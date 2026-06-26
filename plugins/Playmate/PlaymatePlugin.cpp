@@ -15,10 +15,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstring>
 #include <cwchar>
 #include <fstream>
 #include <format>
+#include <optional>
+#include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -91,6 +95,146 @@ namespace {
             return WideToUtf8(raw + 1);
         }
         return WideToUtf8(raw);
+    }
+
+    bool IsAllowedChatLogChannel(const GW::Chat::Channel channel)
+    {
+        switch (channel) {
+            case GW::Chat::CHANNEL_ALL:
+            case GW::Chat::CHANNEL_EMOTE:
+            case GW::Chat::CHANNEL_GUILD:
+            case GW::Chat::CHANNEL_ALLIANCE:
+            case GW::Chat::CHANNEL_WHISPER:
+            case GW::Chat::CHANNEL_ADVISORY:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool LooksGwEncoded(const wchar_t* message)
+    {
+        if (!message || !*message) {
+            return true;
+        }
+
+        size_t total = 0;
+        size_t encoded = 0;
+        for (const wchar_t* cursor = message; *cursor; ++cursor) {
+            ++total;
+            const wchar_t ch = *cursor;
+            if ((ch < 0x20 && ch != L'\t' && ch != L'\n' && ch != L'\r') || ch > 0xFF) {
+                ++encoded;
+            }
+        }
+        return total == 0 || message[0] < 0x20 || message[0] > 0xFF || encoded * 4 > total;
+    }
+
+    std::string StripGwMarkup(std::string text)
+    {
+        std::string out;
+        out.reserve(text.size());
+        bool in_tag = false;
+        for (const char ch : text) {
+            if (ch == '<') {
+                in_tag = true;
+                continue;
+            }
+            if (ch == '>' && in_tag) {
+                in_tag = false;
+                continue;
+            }
+            if (in_tag || static_cast<unsigned char>(ch) < 0x20) {
+                continue;
+            }
+            out.push_back(ch);
+        }
+
+        std::istringstream stream(out);
+        std::ostringstream collapsed;
+        std::string word;
+        while (stream >> word) {
+            if (collapsed.tellp() > 0) {
+                collapsed << ' ';
+            }
+            collapsed << word;
+        }
+        return collapsed.str();
+    }
+
+    bool ContainsInsensitive(const std::string& haystack, const std::string& needle)
+    {
+        return std::search(
+                   haystack.begin(),
+                   haystack.end(),
+                   needle.begin(),
+                   needle.end(),
+                   [](const char a, const char b) {
+                       return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+                   })
+            != haystack.end();
+    }
+
+    bool IsMeaningfulSystemLine(const std::string& message)
+    {
+        static constexpr std::string_view keywords[] = {
+            "quest",
+            "mission",
+            "objective",
+            "completed",
+            "accepted",
+            "updated",
+            "reward",
+            "sold",
+            "bought",
+            "received",
+            "acquired",
+            "gold",
+            "item",
+            "inventory",
+        };
+        return std::ranges::any_of(keywords, [&](const std::string_view keyword) {
+            return ContainsInsensitive(message, std::string(keyword));
+        });
+    }
+
+    bool IsReadableChatText(const std::string& message)
+    {
+        if (message.size() < 3) {
+            return false;
+        }
+        if (ContainsInsensitive(message, "GWToolbox++") || ContainsInsensitive(message, "Plugins detected")
+            || ContainsInsensitive(message, "Plugins are NOT permitted")) {
+            return false;
+        }
+
+        size_t letters = 0;
+        size_t readable = 0;
+        for (const unsigned char ch : message) {
+            if (std::isalpha(ch)) {
+                ++letters;
+            }
+            if (std::isalnum(ch) || std::ispunct(ch) || std::isspace(ch)) {
+                ++readable;
+            }
+        }
+        return letters >= 2 && readable * 10 >= message.size() * 9;
+    }
+
+    std::optional<std::string> FilterChatLogMessage(const GW::Chat::Channel channel, const wchar_t* message)
+    {
+        if (!IsAllowedChatLogChannel(channel) || LooksGwEncoded(message)) {
+            return std::nullopt;
+        }
+
+        auto cleaned = StripGwMarkup(WideToUtf8(message));
+        if (!IsReadableChatText(cleaned)) {
+            return std::nullopt;
+        }
+        if (channel == GW::Chat::CHANNEL_ADVISORY && !IsMeaningfulSystemLine(cleaned)) {
+            return std::nullopt;
+        }
+        return cleaned;
     }
 
     std::string CurrentUtcTimestamp()
@@ -652,10 +796,15 @@ void PlaymatePlugin::OnWriteToChatLog(GW::HookStatus*, const GW::UI::UIMessage m
     }
 
     const auto channel = packet->channel;
-    if (channel == GW::Chat::CHANNEL_TRADE || channel == GW::Chat::CHANNEL_GROUP) {
+    if (channel == GW::Chat::CHANNEL_GROUP) {
         return;
     }
-    active_plugin->QueueTelemetry("chat_log", "Game", ChannelName(channel), WideToUtf8(packet->message));
+
+    const auto filtered_message = FilterChatLogMessage(channel, packet->message);
+    if (!filtered_message) {
+        return;
+    }
+    active_plugin->QueueTelemetry("chat_log", "Game", ChannelName(channel), *filtered_message);
 }
 
 void PlaymatePlugin::OnMapOrQuestEvent(GW::HookStatus*, const GW::UI::UIMessage message_id, void*, void*)
