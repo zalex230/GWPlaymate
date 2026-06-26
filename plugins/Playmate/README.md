@@ -22,12 +22,29 @@ Documents/GWToolboxpp/<computer>/Playmate/telemetry-yyyy-mm-dd.jsonl
 
 This local capture mode is intentionally the default. It lets us play GW1, inspect what the plugin sees, and trim noisy events before sending anything to a cloud backend.
 
+The emitted `persona` is derived from the active Guild Wars character name at runtime, so the same plugin can support any character/persona without recompiling.
+
 The plugin can also POST events to a local companion service:
 
 - `POST /v1/playmate/events` receives telemetry JSON.
 - `GET /v1/playmate/replies` returns either `{"replies":["..."]}` or a plain text reply.
 
 Replies are injected locally with `GW::Chat::WriteChat`, using the active companion persona as the sender. This writes to the client chat window; it does not send a message to ArenaNet servers.
+
+## First Playtest Workflow
+
+1. Launch Guild Wars and GWToolbox++.
+2. Open GWToolbox Settings > Plugins and load `Playmate.dll`.
+3. Open the Playmate panel and keep `Enable telemetry` and `Write local JSONL capture` enabled.
+4. Leave `Send telemetry to backend` disabled while reviewing local signal quality.
+5. Change maps, enter an explorable area, send a few party chat lines, and let several snapshots record.
+6. Review the newest local log:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\plugins\Playmate\tools\review-logs.ps1
+```
+
+The review script summarizes event counts by event type, channel, map, and persona; samples representative messages; identifies repeated message patterns; and prints a starter filter matrix.
 
 ## Where It Is Going
 

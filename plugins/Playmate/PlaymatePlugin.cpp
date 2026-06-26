@@ -1,6 +1,7 @@
 #include "PlaymatePlugin.h"
 
 #include <GWCA/Constants/Constants.h>
+#include <GWCA/Context/CharContext.h>
 #include <GWCA/GameContainers/Array.h>
 #include <GWCA/GameEntities/Quest.h>
 #include <GWCA/Managers/ChatMgr.h>
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <format>
 #include <utility>
@@ -209,7 +211,7 @@ void PlaymatePlugin::DrawSettings()
     config_changed |= ImGui::Checkbox("Enable telemetry", &enabled_);
     config_changed |= ImGui::Checkbox("Write local JSONL capture", &local_capture_);
     config_changed |= ImGui::Checkbox("Send telemetry to backend", &send_to_backend_);
-    config_changed |= ImGui::Checkbox("Inject Azele replies into party chat", &inject_replies_);
+    config_changed |= ImGui::Checkbox("Inject companion replies into party chat", &inject_replies_);
     config_changed |= ImGui::InputText("Local backend URL", backend_url_input_, sizeof(backend_url_input_));
     config_changed |= ImGui::InputText("Local API token", api_token_input_, sizeof(api_token_input_), ImGuiInputTextFlags_Password);
     config_changed |= ImGui::SliderFloat("Reply poll interval", &poll_interval_sec_, 0.25f, 10.0f, "%.2fs");
@@ -221,6 +223,8 @@ void PlaymatePlugin::DrawSettings()
     std::lock_guard lock(status_mutex_);
     ImGui::Separator();
     ImGui::Text("Status: %s", status_.c_str());
+    const auto persona = CurrentPersonaName();
+    ImGui::Text("Persona: %s", persona.c_str());
     const auto log_path = WideToUtf8(LocalLogPath().wstring().c_str());
     ImGui::TextWrapped("Local log: %s", log_path.c_str());
     ImGui::Text("Local: %zu", local_written_count_);
@@ -467,6 +471,7 @@ void PlaymatePlugin::QueueTelemetry(std::string event_type, std::string sender, 
 
     const Snapshot snapshot = BuildSnapshot();
     TelemetryEvent event;
+    event.persona = CurrentPersonaName();
     event.client_time = CurrentUtcTimestamp();
     event.event_type = std::move(event_type);
     event.sender = std::move(sender);
@@ -519,7 +524,8 @@ void PlaymatePlugin::FlushRepliesToChat()
         replies.swap(inbound_replies_);
     }
     for (const auto& reply : replies) {
-        GW::Chat::WriteChat(GW::Chat::CHANNEL_GROUP, reply.c_str(), L"Azele", true);
+        const auto persona = CurrentPersonaNameWide();
+        GW::Chat::WriteChat(GW::Chat::CHANNEL_GROUP, reply.c_str(), persona.c_str(), true);
         std::lock_guard lock(status_mutex_);
         ++received_count_;
     }
@@ -568,6 +574,25 @@ PlaymatePlugin::Snapshot PlaymatePlugin::BuildSnapshot() const
         snapshot.active_quest_objectives = WideToUtf8(quest->objectives);
     }
     return snapshot;
+}
+
+std::string PlaymatePlugin::CurrentPersonaName() const
+{
+    return WideToUtf8(CurrentPersonaNameWide().c_str());
+}
+
+std::wstring PlaymatePlugin::CurrentPersonaNameWide() const
+{
+    const GW::CharContext* context = GW::GetCharContext();
+    if (!context) {
+        return L"Unknown Character";
+    }
+
+    const size_t name_length = wcsnlen_s(context->player_name, _countof(context->player_name));
+    if (name_length == 0) {
+        return L"Unknown Character";
+    }
+    return {context->player_name, name_length};
 }
 
 std::pair<std::string, std::string> PlaymatePlugin::GetConfig() const

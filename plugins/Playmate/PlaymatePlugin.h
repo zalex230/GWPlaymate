@@ -49,7 +49,7 @@ private:
 
     struct TelemetryEvent {
         std::string source = "gwtoolboxpp-playmate";
-        std::string persona = "Azele";
+        std::string persona;
         std::string client_time;
         std::string event_type;
         std::string sender;
@@ -85,6 +85,8 @@ private:
     void SetStatus(std::string status);
 
     [[nodiscard]] Snapshot BuildSnapshot() const;
+    [[nodiscard]] std::string CurrentPersonaName() const;
+    [[nodiscard]] std::wstring CurrentPersonaNameWide() const;
     [[nodiscard]] std::pair<std::string, std::string> GetConfig() const;
     [[nodiscard]] std::filesystem::path LocalLogPath() const;
     [[nodiscard]] std::string EventsUrl() const;

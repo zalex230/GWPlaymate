@@ -12,6 +12,12 @@ Documents/GWToolboxpp/<computer>/Playmate/telemetry-yyyy-mm-dd.jsonl
 
 That lets us play, inspect what the plugin sees, trim noisy events, and stabilize the schema before sending data to Supabase or an LLM-backed companion service.
 
+For first-pass log review, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\plugins\Playmate\tools\review-logs.ps1
+```
+
 For plugin-specific details, see [plugins/Playmate/README.md](plugins/Playmate/README.md).
 
 ## Upstream GWToolbox++ Information
