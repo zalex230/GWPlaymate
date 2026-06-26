@@ -1,10 +1,9 @@
 # GWPlaymate Backend
 
-This backend is the first bridge between the GWToolbox++ Playmate plugin, a LAN Hermes/Ollama service, and Supabase audit/memory storage.
+This backend is the first bridge between the GWToolbox++ Playmate plugin, Supabase, and a Mac Mini running Hermes/Ollama.
 
 ```text
-GWPlaymate.dll -> Windows localhost bridge -> Hermes daemon -> Ollama
-                                      \-> Supabase audit/memory storage
+GWPlaymate.dll -> Windows localhost bridge -> Supabase -> Hermes daemon -> Ollama
 ```
 
 The C++ plugin still captures local JSONL logs. Cloud credentials live only in these Python services.
@@ -13,7 +12,7 @@ The C++ plugin still captures local JSONL logs. Cloud credentials live only in t
 
 - `shared/` contains Pydantic models, event names, throttling helpers, and RAM world-state types.
 - `windows_bridge/` exposes the plugin-compatible HTTP API on `127.0.0.1:8787`.
-- `hermes_daemon/` exposes a LAN HTTP API for low-latency replies and can also listen to Supabase Postgres Changes.
+- `hermes_daemon/` listens to Supabase Postgres Changes and writes companion replies.
 - `supabase/` contains SQL setup/compatibility checks for existing GWPlaymate tables.
 - `tests/` covers payload validation, throttling, state updates, and Hermes decision parsing.
 
@@ -48,24 +47,14 @@ Run this on the Gaming PC:
 python -m backend.windows_bridge.app
 ```
 
-For low-latency replies, point the bridge at the Mac Mini Hermes service:
-
-```env
-HERMES_DIRECT_URL=http://mac-mini-hostname-or-ip:8797
-```
-
 Then in the Playmate plugin:
 
 - `Local backend URL`: `http://127.0.0.1:8787`
 - `Write local JSONL capture`: on
 - `Send telemetry to backend`: on, after local logs look sane
 
-The bridge rejects known noisy event types locally, forwards accepted `player_chat` and
-`environment_alert` events to Hermes in the background, and writes accepted events to Supabase as an
-audit trail. Supabase is not on the critical reply path. For v1 this suppresses `quest_added` and
-`quest_details_changed` until quest text decoding and de-duplication are fixed.
-Audit rows that were already sent over the direct LAN path are marked so Hermes Realtime will not
-generate duplicate replies from them.
+The bridge rejects known noisy event types before touching Supabase. For v1 this suppresses
+`quest_added` and `quest_details_changed` until quest text decoding and de-duplication are fixed.
 
 Smoke test without GW1:
 
@@ -81,15 +70,9 @@ Run this on the Mac Mini after installing the same requirements:
 python -m backend.hermes_daemon.daemon
 ```
 
-The daemon exposes `POST /v1/hermes/events` and `GET /health` on `HERMES_HOST:HERMES_PORT`.
-Set `HERMES_HOST=0.0.0.0` on the Mac Mini if the Windows bridge should reach it over your LAN.
-
-The daemon keeps recent context in RAM, asks Ollama for a small JSON decision, and returns approved
-lines directly to the Windows bridge. If `HERMES_AUDIT_REPLIES=true`, direct replies are also inserted
-into `companion_replies` with `consumed_at` set so they are traceable but not delivered twice.
-
-If `HERMES_ENABLE_REALTIME=true`, the daemon also listens for `INSERT` events on `public.game_logs`
-and `public.environment_alerts` using Supabase Postgres Changes for audit/backfill compatibility.
+The daemon listens for `INSERT` events on `public.game_logs` using Supabase Postgres Changes. It keeps recent context in RAM, asks Ollama for a small JSON decision, and inserts approved lines into `companion_replies`.
+It also listens for `INSERT` events on `public.environment_alerts` so proactive radar events from the
+plugin can trigger companion comments without a player chat prompt.
 
 For the first closed-loop test, leave `HERMES_USE_OLLAMA=false`. In this fallback mode Hermes replies
 deterministically to party `player_chat` rows, which proves the Supabase round trip without involving
@@ -100,8 +83,8 @@ when the source Supabase row is available.
 
 ## Closed-loop smoke test
 
-1. Start the Mac Mini Hermes daemon with `HERMES_USE_OLLAMA=false`.
-2. Start the Windows bridge with `HERMES_DIRECT_URL` pointing to Hermes.
+1. Start the Windows bridge.
+2. Start the Mac Mini Hermes daemon with `HERMES_USE_OLLAMA=false`.
 3. From the Windows PC, run:
 
 ```powershell
@@ -112,9 +95,8 @@ Expected result:
 
 - the bridge returns `{ "accepted": true }` for the synthetic `player_chat`;
 - Supabase receives one `game_logs` row;
-- Hermes returns one direct reply to the bridge;
-- the bridge returns that reply once from `GET /v1/playmate/replies`;
-- Supabase receives audit rows for the accepted event and, when enabled, the generated reply.
+- Hermes inserts one `companion_replies` row;
+- the bridge returns that reply once from `GET /v1/playmate/replies` and marks it consumed.
 
 After that passes, run the same loop from GW1 by enabling `Send telemetry to backend` and `Inject
 companion replies into party chat` in the Playmate panel.
@@ -129,7 +111,8 @@ based rather than continuous spam:
 - `danger_spike` when several enemies are close;
 - `combat_over` when combat clears.
 
-These alerts are forwarded directly to Hermes and stored in `environment_alerts` for audit/memory.
+These alerts are stored in `environment_alerts`; Hermes consumes them through Realtime and writes any
+companion line to `companion_replies`.
 
 ## Supabase
 

@@ -3,23 +3,18 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from threading import Lock
 from typing import Any
 
 from supabase import acreate_client
-import uvicorn
-from fastapi import FastAPI
 
 from backend.shared.config import load_settings
 from backend.shared.constants import COMPANION_REPLIES_TABLE, ENVIRONMENT_ALERTS_TABLE, GAME_LOGS_TABLE
-from backend.shared.models import CompanionReplyInsert, HermesDecision, HermesEventResponse, TelemetryEvent, utc_now_iso
+from backend.shared.models import CompanionReplyInsert, HermesDecision, TelemetryEvent
 from backend.shared.state import LiveWorldState
 from backend.shared.supabase_client import create_supabase_client, require_supabase_settings
 
 
 settings = load_settings()
-app = FastAPI(title="GWPlaymate Hermes", version="0.1.0")
-world_state_lock = Lock()
 world_state = LiveWorldState(
     recent_chat_limit=settings.recent_chat_limit,
     recent_alert_limit=settings.recent_alert_limit,
@@ -159,92 +154,40 @@ def fallback_rule_decision(event: TelemetryEvent) -> HermesDecision:
     return HermesDecision(should_speak=False)
 
 
-def _supabase_configured() -> bool:
-    return bool(settings.supabase_url and settings.supabase_service_key)
-
-
-def insert_reply(reply: CompanionReplyInsert, *, consumed: bool = False) -> None:
-    if not _supabase_configured():
-        return
+def insert_reply(reply: CompanionReplyInsert) -> None:
     client = create_supabase_client(settings)
-    row = reply.to_supabase_insert()
-    if consumed:
-        row["consumed_at"] = utc_now_iso()
-        row["payload"]["delivery"] = "direct_lan"
-    client.table(COMPANION_REPLIES_TABLE).insert(row).execute()
+    client.table(COMPANION_REPLIES_TABLE).insert(reply.to_supabase_insert()).execute()
 
 
 async def handle_game_log_payload(payload: dict[str, Any], *, use_ollama: bool = False) -> None:
     record = payload.get("record") or payload
-    if (record.get("payload") or {}).get("direct_hermes_forwarded"):
-        return
     event = event_from_game_log(record)
     await handle_event(event, record_id=record.get("id"), use_ollama=use_ollama)
 
 
 async def handle_environment_alert_payload(payload: dict[str, Any], *, use_ollama: bool = False) -> None:
     record = payload.get("record") or payload
-    if (record.get("payload") or {}).get("direct_hermes_forwarded"):
-        return
     event = event_from_environment_alert(record)
     await handle_event(event, record_id=record.get("id"), use_ollama=use_ollama)
 
 
 async def handle_event(event: TelemetryEvent, *, record_id: int | None = None, use_ollama: bool = False) -> None:
-    reply = process_event(event, record_id=record_id, use_ollama=use_ollama)
+    world_state.apply_event(event)
+
+    if not world_state.can_speak(settings.hermes_min_speak_seconds):
+        return
+
+    decision = decide_with_ollama(event) if use_ollama else fallback_rule_decision(event)
+    reply = decision.to_reply(
+        persona=world_state.persona,
+        session_id=world_state.session_id,
+        trigger_log_id=record_id if event.event_type != "environment_alert" else None,
+    )
     if not reply:
         return
 
     insert_reply(reply)
-
-
-def process_event(event: TelemetryEvent, *, record_id: int | None = None, use_ollama: bool = False) -> CompanionReplyInsert | None:
-    with world_state_lock:
-        world_state.apply_event(event)
-
-        if not world_state.can_speak(settings.hermes_min_speak_seconds):
-            return None
-
-        persona = world_state.persona
-        session_id = world_state.session_id
-    decision = decide_with_ollama(event) if use_ollama else fallback_rule_decision(event)
-    reply = decision.to_reply(
-        persona=persona,
-        session_id=session_id,
-        trigger_log_id=record_id if event.event_type != "environment_alert" else None,
-    )
-    if not reply:
-        return None
-
-    with world_state_lock:
-        world_state.mark_spoken()
-    return reply
-
-
-@app.get("/health")
-def health() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "service": "gwplaymate-hermes",
-        "mode": "ollama" if settings.hermes_use_ollama else "fallback",
-        "supabase_configured": _supabase_configured(),
-        "realtime_enabled": settings.hermes_enable_realtime,
-    }
-
-
-@app.post("/v1/hermes/events", response_model=HermesEventResponse)
-def post_direct_event(event: TelemetryEvent) -> HermesEventResponse:
-    reply = process_event(event, use_ollama=settings.hermes_use_ollama)
-    if not reply:
-        return HermesEventResponse(replies=[])
-
-    audit_error = None
-    if settings.hermes_audit_replies:
-        try:
-            insert_reply(reply, consumed=True)
-        except Exception as exc:
-            audit_error = str(exc)
-    return HermesEventResponse(replies=[reply.message], audit_error=audit_error)
+    world_state.mark_spoken()
 
 
 async def subscribe_to_game_logs() -> None:
@@ -272,16 +215,12 @@ async def subscribe_to_game_logs() -> None:
 
 
 async def main_async() -> None:
-    if settings.hermes_enable_realtime:
-        require_supabase_settings(settings)
-        await subscribe_to_game_logs()
+    require_supabase_settings(settings)
+    await subscribe_to_game_logs()
     mode = "Ollama" if settings.hermes_use_ollama else "fallback rules"
-    print(f"GWPlaymate Hermes listening on {settings.hermes_host}:{settings.hermes_port} ({mode}).")
-    if settings.hermes_enable_realtime:
-        print("Supabase Realtime subscription is enabled for audit/backfill events.")
-    config = uvicorn.Config(app, host=settings.hermes_host, port=settings.hermes_port, log_level="info")
-    server = uvicorn.Server(config)
-    await server.serve()
+    print(f"GWPlaymate Hermes daemon listening for Supabase game_logs inserts ({mode}).")
+    while True:
+        await asyncio.sleep(1)
 
 
 def main() -> None:

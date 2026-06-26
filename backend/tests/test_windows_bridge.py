@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from backend.windows_bridge.app import _drain_direct_replies, _enqueue_direct_reply, app
+from backend.windows_bridge.app import app
 
 
 class _FakeTable:
@@ -47,25 +47,6 @@ class WindowsBridgeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"accepted": True})
-
-    def test_direct_replies_are_returned_before_supabase_poll(self) -> None:
-        client = TestClient(app)
-
-        _enqueue_direct_reply("A Test", "local-playtest", "Direct hello.")
-
-        response = client.get(
-            "/v1/playmate/replies",
-            params={"persona": "A Test", "session_id": "local-playtest", "limit": 1},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"replies": ["Direct hello."]})
-
-    def test_direct_reply_queue_keeps_other_personas(self) -> None:
-        _enqueue_direct_reply("Other", "local-playtest", "Not yours.")
-
-        self.assertEqual(_drain_direct_replies("A Test", "local-playtest", 8), [])
-        self.assertEqual(_drain_direct_replies("Other", "local-playtest", 8), ["Not yours."])
 
     def test_post_event_suppresses_noisy_quest_details(self) -> None:
         client = TestClient(app)

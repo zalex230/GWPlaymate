@@ -12,7 +12,6 @@ SNAPSHOT_EVENT_TYPES = {
     "quest_details_changed",
 }
 ENVIRONMENT_EVENT_TYPES = {"environment_alert"}
-DIRECT_HERMES_EVENT_TYPES = CHAT_EVENT_TYPES | ENVIRONMENT_EVENT_TYPES
 
 CHAT_CHANNELS = {"party", "local", "guild", "alliance", "whisper", "system", "warning", "emote"}
 NOISY_CHANNELS = {"trade"}

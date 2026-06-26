@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 from backend.hermes_daemon.daemon import (
-    app,
     event_from_environment_alert,
     event_from_game_log,
     extract_json_object,
     fallback_rule_decision,
 )
-from fastapi.testclient import TestClient
 
 
 class HermesDaemonTests(unittest.TestCase):
@@ -110,23 +107,6 @@ class HermesDaemonTests(unittest.TestCase):
 
         self.assertTrue(decision.should_speak)
         self.assertEqual(decision.urgency, "HIGH")
-
-    def test_direct_hermes_endpoint_returns_reply(self) -> None:
-        client = TestClient(app)
-        payload = {
-            "event_type": "player_chat",
-            "sender": "Player",
-            "channel": "party",
-            "message": "hello",
-            "persona": "A Test",
-            "session_id": "test-direct",
-        }
-
-        with patch("backend.hermes_daemon.daemon.insert_reply"):
-            response = client.post("/v1/hermes/events", json=payload)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["replies"], ["I'm here. I caught that."])
 
 
 if __name__ == "__main__":
