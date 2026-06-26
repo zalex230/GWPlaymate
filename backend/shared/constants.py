@@ -12,6 +12,18 @@ SNAPSHOT_EVENT_TYPES = {
     "quest_details_changed",
 }
 ENVIRONMENT_EVENT_TYPES = {"environment_alert"}
+GAMEPLAY_EVENT_TYPES = {
+    "mission_objective_added",
+    "mission_objective_completed",
+    "mission_objective_updated",
+    "mission_progress_started",
+    "mission_progress_updated",
+    "party_defeated",
+    "party_member_down",
+    "party_member_recovered",
+    "vanquish_complete",
+    "vanquish_progress",
+}
 
 CHAT_CHANNELS = {"party", "local", "guild", "alliance", "whisper", "system", "warning", "emote"}
 NOISY_CHANNELS = {"trade"}

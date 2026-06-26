@@ -77,6 +77,34 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(row["distance"], 1234.5)
         self.assertEqual(row["payload"]["close_hostile_count"], 2)
 
+    def test_gameplay_event_metadata_preserves_context_fields(self) -> None:
+        event = TelemetryEvent(
+            persona="A Test",
+            event_type="party_member_down",
+            sender="System",
+            channel="system",
+            message="Party member down.",
+            agent_id=42,
+            agent_name="Mhenlo",
+            objective_id=8,
+            objective_name="Keep Rurik alive",
+            progress_current=3,
+            progress_total=10,
+            foes_killed=3,
+            foes_remaining=7,
+            severity="HIGH",
+        )
+
+        payload = event.to_game_log_insert()["payload"]
+
+        self.assertEqual(payload["agent_id"], 42)
+        self.assertEqual(payload["agent_name"], "Mhenlo")
+        self.assertEqual(payload["objective_id"], 8)
+        self.assertEqual(payload["objective_name"], "Keep Rurik alive")
+        self.assertEqual(payload["progress_current"], 3)
+        self.assertEqual(payload["progress_total"], 10)
+        self.assertEqual(payload["foes_remaining"], 7)
+
     def test_memory_insert_maps_character_context(self) -> None:
         from backend.shared.models import MemoryInsert
 

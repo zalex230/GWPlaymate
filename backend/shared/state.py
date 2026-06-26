@@ -5,6 +5,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.shared.constants import GAMEPLAY_EVENT_TYPES
 from backend.shared.models import TelemetryEvent
 
 
@@ -48,7 +49,7 @@ class LiveWorldState:
             while len(self.recent_chat_history) > self.recent_chat_limit:
                 self.recent_chat_history.popleft()
 
-        if event.event_type == "environment_alert":
+        if event.event_type == "environment_alert" or event.event_type in GAMEPLAY_EVENT_TYPES:
             self.recent_alerts.append(event.metadata())
             while len(self.recent_alerts) > self.recent_alert_limit:
                 self.recent_alerts.popleft()

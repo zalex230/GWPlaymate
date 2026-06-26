@@ -34,6 +34,14 @@ class TelemetryEvent(BaseModel):
     closest_hostile_distance: float = 0.0
     alert_type: str = ""
     severity: str = "NORMAL"
+    agent_id: int = 0
+    agent_name: str = ""
+    objective_id: int = 0
+    objective_name: str = ""
+    progress_current: float = 0.0
+    progress_total: float = 0.0
+    foes_killed: int = 0
+    foes_remaining: int = 0
     session_id: str = "local-playtest"
 
     @field_validator("event_type", "sender", "channel", "message")
@@ -77,6 +85,14 @@ class TelemetryEvent(BaseModel):
             "closest_hostile_distance": self.closest_hostile_distance,
             "alert_type": self.alert_type,
             "severity": self.severity,
+            "agent_id": self.agent_id,
+            "agent_name": self.agent_name,
+            "objective_id": self.objective_id,
+            "objective_name": self.objective_name,
+            "progress_current": self.progress_current,
+            "progress_total": self.progress_total,
+            "foes_killed": self.foes_killed,
+            "foes_remaining": self.foes_remaining,
             "session_id": self.session_id,
         }
 

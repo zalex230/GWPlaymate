@@ -8,7 +8,7 @@ from typing import Any
 from supabase import acreate_client
 
 from backend.shared.config import load_settings
-from backend.shared.constants import COMPANION_REPLIES_TABLE, ENVIRONMENT_ALERTS_TABLE, GAME_LOGS_TABLE
+from backend.shared.constants import COMPANION_REPLIES_TABLE, ENVIRONMENT_ALERTS_TABLE, GAMEPLAY_EVENT_TYPES, GAME_LOGS_TABLE
 from backend.shared.models import CompanionReplyInsert, HermesDecision, TelemetryEvent
 from backend.shared.state import LiveWorldState
 from backend.shared.supabase_client import create_supabase_client, require_supabase_settings
@@ -50,6 +50,14 @@ def event_from_game_log(record: dict[str, Any]) -> TelemetryEvent:
         closest_hostile_distance=metadata.get("closest_hostile_distance", record.get("distance") or 0),
         alert_type=metadata.get("alert_type", record.get("alert_type") or ""),
         severity=metadata.get("severity", record.get("severity") or "NORMAL"),
+        agent_id=metadata.get("agent_id", record.get("agent_id") or 0),
+        agent_name=metadata.get("agent_name", ""),
+        objective_id=metadata.get("objective_id", 0),
+        objective_name=metadata.get("objective_name", ""),
+        progress_current=metadata.get("progress_current", 0),
+        progress_total=metadata.get("progress_total", 0),
+        foes_killed=metadata.get("foes_killed", 0),
+        foes_remaining=metadata.get("foes_remaining", 0),
         session_id=metadata.get("session_id", settings.active_session),
     )
 
@@ -82,6 +90,14 @@ def event_from_environment_alert(record: dict[str, Any]) -> TelemetryEvent:
         closest_hostile_distance=metadata.get("closest_hostile_distance", record.get("distance") or 0),
         alert_type=metadata.get("alert_type", record.get("alert_type") or ""),
         severity=metadata.get("severity", record.get("severity") or "NORMAL"),
+        agent_id=metadata.get("agent_id", record.get("agent_id") or 0),
+        agent_name=metadata.get("agent_name", ""),
+        objective_id=metadata.get("objective_id", 0),
+        objective_name=metadata.get("objective_name", ""),
+        progress_current=metadata.get("progress_current", 0),
+        progress_total=metadata.get("progress_total", 0),
+        foes_killed=metadata.get("foes_killed", 0),
+        foes_remaining=metadata.get("foes_remaining", 0),
         session_id=metadata.get("session_id", settings.active_session),
     )
 
@@ -151,6 +167,38 @@ def fallback_rule_decision(event: TelemetryEvent) -> HermesDecision:
             urgency="HIGH",
             response="Careful. Something nearby looks dangerous.",
         )
+    if event.event_type == "party_member_down":
+        name = f" {event.agent_name}" if event.agent_name else ""
+        return HermesDecision(
+            should_speak=True,
+            channel_override="CHANNEL_PARTY",
+            urgency="HIGH",
+            response=f"{name.strip() or 'Someone'} is down. Pull back and stabilize.",
+        )
+    if event.event_type == "party_defeated":
+        return HermesDecision(
+            should_speak=True,
+            channel_override="CHANNEL_PARTY",
+            urgency="HIGH",
+            response="We wiped. Let's reset, rebuff, and take the next pull slower.",
+        )
+    if event.event_type == "mission_objective_completed":
+        objective = f": {event.objective_name}" if event.objective_name else ""
+        return HermesDecision(
+            should_speak=True,
+            channel_override="CHANNEL_PARTY",
+            urgency="NORMAL",
+            response=f"Objective complete{objective}. Good push.",
+        )
+    if event.event_type == "vanquish_complete":
+        return HermesDecision(
+            should_speak=True,
+            channel_override="CHANNEL_PARTY",
+            urgency="HIGH",
+            response="Vanquish complete. Nice clear.",
+        )
+    if event.event_type in GAMEPLAY_EVENT_TYPES:
+        return HermesDecision(should_speak=False)
     return HermesDecision(should_speak=False)
 
 

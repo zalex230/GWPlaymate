@@ -9,8 +9,10 @@
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/MapMgr.h>
+#include <GWCA/Managers/PartyMgr.h>
 #include <GWCA/Managers/QuestMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
+#include <GWCA/GameEntities/Party.h>
 #include <GWCA/Packets/StoC.h>
 
 #include <HttpClient.h>
@@ -279,6 +281,66 @@ namespace {
         return std::sqrt(dx * dx + dy * dy);
     }
 
+    bool IsAgentInCurrentParty(const uint32_t agent_id)
+    {
+        if (!agent_id) {
+            return false;
+        }
+        if (const GW::AgentLiving* player = GW::Agents::GetControlledCharacter(); player && player->agent_id == agent_id) {
+            return true;
+        }
+        const GW::PartyInfo* party = GW::PartyMgr::GetPartyInfo();
+        if (!party) {
+            return false;
+        }
+        for (const GW::HeroPartyMember& hero : party->heroes) {
+            if (hero.agent_id == agent_id) {
+                return true;
+            }
+        }
+        for (const GW::HenchmanPartyMember& henchman : party->henchmen) {
+            if (henchman.agent_id == agent_id) {
+                return true;
+            }
+        }
+        for (const GW::AgentID other : party->others) {
+            if (other == agent_id) {
+                return true;
+            }
+        }
+        for (const GW::PlayerPartyMember& player : party->players) {
+            if (GW::Agents::GetAgentIdByLoginNumber(player.login_number) == agent_id) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::string PartyAgentName(const uint32_t agent_id)
+    {
+        const GW::Agent* agent = GW::Agents::GetAgentByID(agent_id);
+        const GW::AgentLiving* living = agent ? agent->GetAsAgentLiving() : nullptr;
+        if (living && living->login_number) {
+            return WideToUtf8(GW::Agents::GetPlayerNameByLoginNumber(living->login_number));
+        }
+        return {};
+    }
+
+    bool IsReplyTriggerEvent(const std::string& event_type)
+    {
+        static constexpr std::string_view triggers[] = {
+            "player_chat",
+            "environment_alert",
+            "party_member_down",
+            "party_defeated",
+            "mission_objective_completed",
+            "vanquish_complete",
+        };
+        return std::ranges::any_of(triggers, [&](const std::string_view trigger) {
+            return event_type == trigger;
+        });
+    }
+
     const char* AgeText(const uint64_t timestamp_ms, char* buffer, const size_t buffer_size)
     {
         if (!timestamp_ms) {
@@ -509,6 +571,15 @@ void PlaymatePlugin::RegisterHooks()
     GW::UI::RegisterUIMessageCallback(&world_event_entry_, GW::UI::UIMessage::kMapChange, OnMapOrQuestEvent, 0x8000);
     GW::UI::RegisterUIMessageCallback(&world_event_entry_, GW::UI::UIMessage::kQuestAdded, OnMapOrQuestEvent, 0x8000);
     GW::UI::RegisterUIMessageCallback(&world_event_entry_, GW::UI::UIMessage::kQuestDetailsChanged, OnMapOrQuestEvent, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::AgentState>(&stoc_event_entry_, OnAgentState, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::PartyDefeated>(&stoc_event_entry_, OnPartyDefeated, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::ObjectiveAdd>(&stoc_event_entry_, OnObjectiveAdd, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::ObjectiveDone>(&stoc_event_entry_, OnObjectiveDone, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::ObjectiveUpdateName>(&stoc_event_entry_, OnObjectiveUpdateName, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::CreateMissionProgress>(&stoc_event_entry_, OnCreateMissionProgress, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::UpdateMissionProgress>(&stoc_event_entry_, OnUpdateMissionProgress, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::VanquishProgress>(&stoc_event_entry_, OnVanquishProgress, 0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::VanquishComplete>(&stoc_event_entry_, OnVanquishComplete, 0x8000);
 }
 
 void PlaymatePlugin::RemoveHooks()
@@ -516,6 +587,7 @@ void PlaymatePlugin::RemoveHooks()
     GW::UI::RemoveUIMessageCallback(&send_chat_entry_);
     GW::UI::RemoveUIMessageCallback(&write_chat_entry_);
     GW::UI::RemoveUIMessageCallback(&world_event_entry_);
+    GW::StoC::RemoveCallbacks(&stoc_event_entry_);
 }
 
 void PlaymatePlugin::StartWorker()
@@ -580,7 +652,7 @@ void PlaymatePlugin::WorkerLoop()
                 last_sent_ms_ = MonotonicMs();
                 last_backend_error_.clear();
                 last_event_status_ = std::format("{} accepted by bridge", event.event_type);
-                if (event.event_type == "player_chat" || event.event_type == "environment_alert") {
+                if (IsReplyTriggerEvent(event.event_type)) {
                     waiting_for_reply_ = true;
                     waiting_since_ms_ = last_sent_ms_;
                     last_reply_status_ = "Waiting for Hermes";
@@ -775,6 +847,40 @@ void PlaymatePlugin::QueueEnvironmentAlert(std::string alert_type, std::string s
     event.closest_hostile_distance = scan.closest_hostile_distance;
     event.alert_type = std::move(alert_type);
     event.severity = std::move(severity);
+
+    {
+        std::lock_guard lock(queue_mutex_);
+        if (outbound_.size() >= 256) {
+            outbound_.pop_front();
+        }
+        outbound_.push_back(std::move(event));
+    }
+    queue_cv_.notify_one();
+}
+
+void PlaymatePlugin::QueueGameplayEvent(TelemetryEvent event)
+{
+    if (!telemetry_enabled_.load() || (!local_capture_enabled_.load() && !backend_enabled_.load()) || event.message.empty()) {
+        return;
+    }
+
+    const Snapshot snapshot = BuildSnapshot();
+    event.persona = CurrentPersonaName();
+    event.client_time = CurrentUtcTimestamp();
+    if (event.sender.empty()) {
+        event.sender = "System";
+    }
+    if (event.channel.empty()) {
+        event.channel = "system";
+    }
+    event.map_id = snapshot.map_id;
+    event.instance_type = snapshot.instance_type;
+    event.district = snapshot.district;
+    event.instance_time = snapshot.instance_time;
+    event.active_quest_id = snapshot.active_quest_id;
+    event.quest_count = snapshot.quest_count;
+    event.active_quest_name = snapshot.active_quest_name;
+    event.active_quest_objectives = snapshot.active_quest_objectives;
 
     {
         std::lock_guard lock(queue_mutex_);
@@ -1092,9 +1198,19 @@ void PlaymatePlugin::OnMapOrQuestEvent(GW::HookStatus*, const GW::UI::UIMessage 
 
     switch (message_id) {
         case GW::UI::UIMessage::kMapLoaded:
+            {
+                std::lock_guard lock(active_plugin->gameplay_state_mutex_);
+                active_plugin->last_agent_states_.clear();
+                active_plugin->last_mission_progress_.clear();
+            }
             active_plugin->QueueSnapshotEvent("map_loaded");
             break;
         case GW::UI::UIMessage::kMapChange:
+            {
+                std::lock_guard lock(active_plugin->gameplay_state_mutex_);
+                active_plugin->last_agent_states_.clear();
+                active_plugin->last_mission_progress_.clear();
+            }
             active_plugin->QueueSnapshotEvent("map_change");
             break;
         case GW::UI::UIMessage::kQuestAdded:
@@ -1106,4 +1222,174 @@ void PlaymatePlugin::OnMapOrQuestEvent(GW::HookStatus*, const GW::UI::UIMessage 
         default:
             break;
     }
+}
+
+void PlaymatePlugin::OnAgentState(GW::HookStatus*, GW::Packet::StoC::AgentState* packet)
+{
+    if (!active_plugin || !packet || !IsAgentInCurrentParty(packet->agent_id)) {
+        return;
+    }
+
+    constexpr uint32_t dead_state_bit = 0x10;
+    const bool is_dead = (packet->state & dead_state_bit) != 0;
+    bool was_dead = false;
+    {
+        std::lock_guard lock(active_plugin->gameplay_state_mutex_);
+        const auto previous = active_plugin->last_agent_states_.find(packet->agent_id);
+        was_dead = previous != active_plugin->last_agent_states_.end() && (previous->second & dead_state_bit) != 0;
+        active_plugin->last_agent_states_[packet->agent_id] = packet->state;
+    }
+
+    if (is_dead == was_dead) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = is_dead ? "party_member_down" : "party_member_recovered";
+    event.message = is_dead ? "Party member down." : "Party member recovered.";
+    event.agent_id = packet->agent_id;
+    event.agent_name = PartyAgentName(packet->agent_id);
+    event.alert_type = event.event_type;
+    event.severity = is_dead ? "HIGH" : "LOW";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnPartyDefeated(GW::HookStatus*, GW::Packet::StoC::PartyDefeated*)
+{
+    if (!active_plugin) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "party_defeated";
+    event.message = "The party was defeated.";
+    event.alert_type = event.event_type;
+    event.severity = "HIGH";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnObjectiveAdd(GW::HookStatus*, GW::Packet::StoC::ObjectiveAdd* packet)
+{
+    if (!active_plugin || !packet) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "mission_objective_added";
+    event.objective_id = packet->objective_id;
+    event.objective_name = WideToUtf8(packet->name);
+    event.message = event.objective_name.empty() ? "Mission objective added." : std::format("Mission objective added: {}", event.objective_name);
+    event.severity = "NORMAL";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnObjectiveDone(GW::HookStatus*, GW::Packet::StoC::ObjectiveDone* packet)
+{
+    if (!active_plugin || !packet) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "mission_objective_completed";
+    event.objective_id = packet->objective_id;
+    event.message = std::format("Mission objective completed: {}.", packet->objective_id);
+    event.alert_type = event.event_type;
+    event.severity = "HIGH";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnObjectiveUpdateName(GW::HookStatus*, GW::Packet::StoC::ObjectiveUpdateName* packet)
+{
+    if (!active_plugin || !packet) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "mission_objective_updated";
+    event.objective_id = packet->objective_id;
+    event.objective_name = WideToUtf8(packet->objective_name);
+    event.message = event.objective_name.empty() ? "Mission objective updated." : std::format("Mission objective updated: {}", event.objective_name);
+    event.severity = "NORMAL";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnCreateMissionProgress(GW::HookStatus*, GW::Packet::StoC::CreateMissionProgress* packet)
+{
+    if (!active_plugin || !packet) {
+        return;
+    }
+
+    {
+        std::lock_guard lock(active_plugin->gameplay_state_mutex_);
+        active_plugin->last_mission_progress_[packet->id] = packet->filled;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "mission_progress_started";
+    event.objective_id = packet->id;
+    event.progress_current = packet->filled;
+    event.progress_total = 1.0f;
+    event.message = std::format("Mission progress started at {:.0f} percent.", packet->filled * 100.0f);
+    event.severity = "NORMAL";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnUpdateMissionProgress(GW::HookStatus*, GW::Packet::StoC::UpdateMissionProgress* packet)
+{
+    if (!active_plugin || !packet) {
+        return;
+    }
+
+    bool changed_enough = false;
+    {
+        std::lock_guard lock(active_plugin->gameplay_state_mutex_);
+        const auto previous = active_plugin->last_mission_progress_.find(packet->id);
+        changed_enough = previous == active_plugin->last_mission_progress_.end()
+            || std::abs(previous->second - packet->filled) >= 0.01f;
+        active_plugin->last_mission_progress_[packet->id] = packet->filled;
+    }
+    if (!changed_enough) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "mission_progress_updated";
+    event.objective_id = packet->id;
+    event.progress_current = packet->filled;
+    event.progress_total = 1.0f;
+    event.message = std::format("Mission progress updated to {:.0f} percent.", packet->filled * 100.0f);
+    event.severity = packet->filled >= 1.0f ? "HIGH" : "NORMAL";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnVanquishProgress(GW::HookStatus*, GW::Packet::StoC::VanquishProgress* packet)
+{
+    if (!active_plugin || !packet) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "vanquish_progress";
+    event.foes_killed = packet->foes_killed;
+    event.foes_remaining = packet->foes_remaining;
+    event.progress_current = static_cast<float>(packet->foes_killed);
+    event.progress_total = static_cast<float>(packet->foes_killed + packet->foes_remaining);
+    event.message = std::format("Vanquish progress: {} foes killed, {} remaining.", packet->foes_killed, packet->foes_remaining);
+    event.severity = packet->foes_remaining <= 5 ? "HIGH" : "NORMAL";
+    active_plugin->QueueGameplayEvent(std::move(event));
+}
+
+void PlaymatePlugin::OnVanquishComplete(GW::HookStatus*, GW::Packet::StoC::VanquishComplete* packet)
+{
+    if (!active_plugin || !packet) {
+        return;
+    }
+
+    TelemetryEvent event;
+    event.event_type = "vanquish_complete";
+    event.map_id = packet->map_id;
+    event.message = std::format("Vanquish complete. Reward: {} XP, {} gold.", packet->experience, packet->gold);
+    event.alert_type = event.event_type;
+    event.severity = "HIGH";
+    active_plugin->QueueGameplayEvent(std::move(event));
 }

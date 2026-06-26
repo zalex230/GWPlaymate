@@ -15,7 +15,20 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
+
+namespace GW::Packet::StoC {
+    struct AgentState;
+    struct CreateMissionProgress;
+    struct ObjectiveAdd;
+    struct ObjectiveDone;
+    struct ObjectiveUpdateName;
+    struct PartyDefeated;
+    struct UpdateMissionProgress;
+    struct VanquishComplete;
+    struct VanquishProgress;
+}
 
 class PlaymatePlugin : public ToolboxUIPlugin {
 public:
@@ -73,6 +86,14 @@ private:
         float closest_hostile_distance = 0.0f;
         std::string alert_type;
         std::string severity;
+        uint32_t agent_id = 0;
+        std::string agent_name;
+        uint32_t objective_id = 0;
+        std::string objective_name;
+        float progress_current = 0.0f;
+        float progress_total = 0.0f;
+        uint32_t foes_killed = 0;
+        uint32_t foes_remaining = 0;
     };
 
     struct RepliesResponse {
@@ -102,6 +123,7 @@ private:
     void PollReplies();
     void QueueTelemetry(std::string event_type, std::string sender, std::string channel, std::string message);
     void QueueEnvironmentAlert(std::string alert_type, std::string severity, std::string message, const EnvironmentScan& scan);
+    void QueueGameplayEvent(TelemetryEvent event);
     void QueueSnapshotEvent(const char* event_type);
     void MaybeQueueEnvironmentAlert();
     void QueueReply(std::wstring reply);
@@ -122,6 +144,15 @@ private:
     static void OnSendChat(GW::HookStatus* status, GW::UI::UIMessage message_id, void* wparam, void* lparam);
     static void OnWriteToChatLog(GW::HookStatus* status, GW::UI::UIMessage message_id, void* wparam, void* lparam);
     static void OnMapOrQuestEvent(GW::HookStatus* status, GW::UI::UIMessage message_id, void* wparam, void* lparam);
+    static void OnAgentState(GW::HookStatus* status, GW::Packet::StoC::AgentState* packet);
+    static void OnPartyDefeated(GW::HookStatus* status, GW::Packet::StoC::PartyDefeated* packet);
+    static void OnObjectiveAdd(GW::HookStatus* status, GW::Packet::StoC::ObjectiveAdd* packet);
+    static void OnObjectiveDone(GW::HookStatus* status, GW::Packet::StoC::ObjectiveDone* packet);
+    static void OnObjectiveUpdateName(GW::HookStatus* status, GW::Packet::StoC::ObjectiveUpdateName* packet);
+    static void OnCreateMissionProgress(GW::HookStatus* status, GW::Packet::StoC::CreateMissionProgress* packet);
+    static void OnUpdateMissionProgress(GW::HookStatus* status, GW::Packet::StoC::UpdateMissionProgress* packet);
+    static void OnVanquishProgress(GW::HookStatus* status, GW::Packet::StoC::VanquishProgress* packet);
+    static void OnVanquishComplete(GW::HookStatus* status, GW::Packet::StoC::VanquishComplete* packet);
 
 private:
     bool enabled_ = true;
@@ -176,8 +207,12 @@ private:
     uint32_t last_hostile_count_ = 0;
     uint32_t last_close_hostile_count_ = 0;
     bool last_in_combat_ = false;
+    mutable std::mutex gameplay_state_mutex_;
+    std::unordered_map<uint32_t, uint32_t> last_agent_states_;
+    std::unordered_map<uint32_t, float> last_mission_progress_;
 
     GW::HookEntry send_chat_entry_;
     GW::HookEntry write_chat_entry_;
     GW::HookEntry world_event_entry_;
+    GW::HookEntry stoc_event_entry_;
 };

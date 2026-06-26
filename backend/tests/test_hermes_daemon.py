@@ -30,6 +30,27 @@ class HermesDaemonTests(unittest.TestCase):
         self.assertEqual(event.event_type, "player_chat")
         self.assertEqual(event.map_id, 42)
 
+    def test_event_from_game_log_preserves_gameplay_metadata(self) -> None:
+        event = event_from_game_log(
+            {
+                "sender": "System",
+                "channel": "system",
+                "message": "Party member down.",
+                "payload": {
+                    "persona": "A Test",
+                    "event_type": "party_member_down",
+                    "agent_id": 42,
+                    "agent_name": "Mhenlo",
+                    "severity": "HIGH",
+                },
+            }
+        )
+
+        self.assertEqual(event.event_type, "party_member_down")
+        self.assertEqual(event.agent_id, 42)
+        self.assertEqual(event.agent_name, "Mhenlo")
+        self.assertEqual(event.severity, "HIGH")
+
     def test_extract_json_object_from_wrapped_text(self) -> None:
         parsed = extract_json_object('Decision: {"should_speak": false, "response": ""}')
 
@@ -107,6 +128,26 @@ class HermesDaemonTests(unittest.TestCase):
 
         self.assertTrue(decision.should_speak)
         self.assertEqual(decision.urgency, "HIGH")
+
+    def test_fallback_rule_replies_to_party_member_down(self) -> None:
+        decision = fallback_rule_decision(
+            event_from_game_log(
+                {
+                    "sender": "System",
+                    "channel": "system",
+                    "message": "Party member down.",
+                    "payload": {
+                        "event_type": "party_member_down",
+                        "agent_id": 42,
+                        "agent_name": "Mhenlo",
+                    },
+                }
+            )
+        )
+
+        self.assertTrue(decision.should_speak)
+        self.assertEqual(decision.urgency, "HIGH")
+        self.assertIn("Mhenlo", decision.response)
 
 
 if __name__ == "__main__":
