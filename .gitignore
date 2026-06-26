@@ -74,3 +74,9 @@ GWToolbox.aps
 # VSCode stuff
 .vscode/
 .aider*
+
+# GWPlaymate backend secrets
+backend/.env
+.venv-playmate/
+__pycache__/
+*.pyc

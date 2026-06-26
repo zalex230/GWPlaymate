@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import unittest
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from backend.windows_bridge.app import app
+
+
+class _FakeTable:
+    def insert(self, _payload):
+        return self
+
+    def execute(self):
+        return type("Response", (), {"data": []})()
+
+
+class _FakeSupabase:
+    def table(self, _name):
+        return _FakeTable()
+
+
+class WindowsBridgeTests(unittest.TestCase):
+    def test_health(self) -> None:
+        client = TestClient(app)
+
+        response = client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_post_event_accepts_plugin_payload(self) -> None:
+        client = TestClient(app)
+        payload = {
+            "source": "gwtoolboxpp-playmate",
+            "persona": "A Test",
+            "client_time": "2026-06-26T12:00:00Z",
+            "event_type": "player_chat",
+            "sender": "Player",
+            "channel": "party",
+            "message": "hello",
+        }
+
+        with patch("backend.windows_bridge.app._client", return_value=_FakeSupabase()):
+            response = client.post("/v1/playmate/events", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"accepted": True})
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -20,6 +20,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\plugins\Playmate\tools\rev
 
 For plugin-specific details, see [plugins/Playmate/README.md](plugins/Playmate/README.md).
 
+For the Windows bridge, Supabase loop, and Mac Mini Hermes/Ollama daemon, see [backend/README.md](backend/README.md).
+
 ## Upstream GWToolbox++ Information
 
 ## GWToolbox++
