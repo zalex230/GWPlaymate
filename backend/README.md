@@ -114,6 +114,23 @@ based rather than continuous spam:
 These alerts are stored in `environment_alerts`; Hermes consumes them through Realtime and writes any
 companion line to `companion_replies`.
 
+## Memories
+
+Longer-term memory is stored in `memories`, keyed by `character_name` rather than by a hardcoded
+character-specific table. Memory rows are intended for compact, useful session summaries rather than
+raw chat/log duplication.
+
+Good memory candidates include:
+
+- mission or explorable-session summaries;
+- rare or notable item drops;
+- quest decisions and progress;
+- recurring companion/player preferences;
+- map, quest, and source-log ranges that make the memory traceable later.
+
+Embeddings are optional. The first pass can store plain summaries and metadata; vector search can be
+enabled once the summarizer is stable.
+
 ## Supabase
 
 Run `backend/supabase/setup.sql` in the Supabase SQL editor. It is written to be idempotent and only adds minimal compatibility columns/publication membership needed by this backend.

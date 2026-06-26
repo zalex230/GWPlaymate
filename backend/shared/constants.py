@@ -20,5 +20,6 @@ SUPPRESSED_EVENT_TYPES = {"quest_added", "quest_details_changed"}
 GAME_LOGS_TABLE = "game_logs"
 ENVIRONMENT_ALERTS_TABLE = "environment_alerts"
 COMPANION_REPLIES_TABLE = "companion_replies"
+MEMORIES_TABLE = "memories"
 
 DEFAULT_SESSION_ID = "local-playtest"

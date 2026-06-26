@@ -80,7 +80,7 @@ class HermesDaemonTests(unittest.TestCase):
                 "agent_id": 99,
                 "distance": 800,
                 "payload": {
-                    "persona": "Azele",
+                    "persona": "A Test",
                     "hostile_count": 4,
                     "close_hostile_count": 3,
                     "session_id": "local-playtest",

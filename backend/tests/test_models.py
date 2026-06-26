@@ -77,6 +77,30 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(row["distance"], 1234.5)
         self.assertEqual(row["payload"]["close_hostile_count"], 2)
 
+    def test_memory_insert_maps_character_context(self) -> None:
+        from backend.shared.models import MemoryInsert
+
+        memory = MemoryInsert(
+            character_name="A Test",
+            session_id="session-1",
+            memory_type="mission_summary",
+            title="Ruins of Surmia",
+            summary_text="Cleared a mission and found a rare sword.",
+            map_id=148,
+            active_quest_id=1185,
+            rare_items=[{"name": "Rare Sword", "rarity": "gold"}],
+            tags=["mission", "rare_item"],
+            source_log_start_id=1,
+            source_log_end_id=9,
+        )
+
+        row = memory.to_supabase_insert()
+
+        self.assertEqual(row["character_name"], "A Test")
+        self.assertEqual(row["memory_type"], "mission_summary")
+        self.assertEqual(row["rare_items"][0]["name"], "Rare Sword")
+        self.assertEqual(row["tags"], ["mission", "rare_item"])
+
 
 if __name__ == "__main__":
     unittest.main()

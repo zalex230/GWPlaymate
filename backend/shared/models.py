@@ -160,6 +160,48 @@ class RepliesResponse(BaseModel):
     replies: list[str] = Field(default_factory=list)
 
 
+class MemoryInsert(BaseModel):
+    character_name: str
+    summary_text: str
+    session_id: str = "local-playtest"
+    memory_type: str = "session_summary"
+    title: str | None = None
+    map_id: int | None = None
+    active_quest_id: int | None = None
+    rare_items: list[dict[str, Any]] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    source_log_start_id: int | None = None
+    source_log_end_id: int | None = None
+    embedding: list[float] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("character_name", "summary_text", "memory_type")
+    @classmethod
+    def require_memory_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be empty")
+        return value.strip()
+
+    def to_supabase_insert(self) -> dict[str, Any]:
+        row: dict[str, Any] = {
+            "character_name": self.character_name,
+            "session_id": self.session_id,
+            "memory_type": self.memory_type,
+            "title": self.title,
+            "summary_text": self.summary_text,
+            "map_id": self.map_id,
+            "active_quest_id": self.active_quest_id,
+            "rare_items": self.rare_items,
+            "tags": self.tags,
+            "source_log_start_id": self.source_log_start_id,
+            "source_log_end_id": self.source_log_end_id,
+            "metadata": self.metadata,
+        }
+        if self.embedding is not None:
+            row["embedding"] = self.embedding
+        return row
+
+
 class HermesDecision(BaseModel):
     should_speak: bool = False
     channel_override: Literal["CHANNEL_PARTY", "CHANNEL_LOCAL", "CHANNEL_SYSTEM"] = "CHANNEL_LOCAL"
