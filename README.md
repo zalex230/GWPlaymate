@@ -1,6 +1,24 @@
-# GWToolbox++
+# GWPlaymate
 
-## A set of tools for Guild Wars Players
+GWPlaymate is a fork of [GWToolbox++](https://github.com/gwdevhub/GWToolboxpp) for experimenting with in-character AI companions inside Guild Wars 1.
+
+The main addition is the Playmate plugin, a GWToolbox++ UI plugin that acts as an in-game sensory layer. It listens to GW1 through GWCA, captures useful game state and chat context as structured telemetry, and can render companion replies locally in the client chat window. The plugin is designed to support any companion persona rather than baking one character into the project identity.
+
+Playmate currently focuses on local capture first. It writes JSON Lines telemetry to:
+
+```text
+Documents/GWToolboxpp/<computer>/Playmate/telemetry-yyyy-mm-dd.jsonl
+```
+
+That lets us play, inspect what the plugin sees, trim noisy events, and stabilize the schema before sending data to Supabase or an LLM-backed companion service.
+
+For plugin-specific details, see [plugins/Playmate/README.md](plugins/Playmate/README.md).
+
+## Upstream GWToolbox++ Information
+
+## GWToolbox++
+
+### A set of tools for Guild Wars Players
 
 If you are here to check toolbox features or for a download link, go to [https://gwtoolbox.com](https://gwtoolbox.com). Stay here and keep reading for information on how to download and build from source.
 
