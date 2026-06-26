@@ -18,6 +18,10 @@ class LiveWorldState:
     active_quest_id: int = 0
     active_quest_name: str = ""
     active_quest_objectives: str = ""
+    hostile_count: int = 0
+    close_hostile_count: int = 0
+    closest_hostile_distance: float = 0.0
+    player_hp: float = 0.0
     persona: str = "Unknown Character"
     session_id: str = "local-playtest"
     recent_chat_history: deque[str] = field(default_factory=deque)
@@ -33,6 +37,10 @@ class LiveWorldState:
         self.active_quest_id = event.active_quest_id
         self.active_quest_name = event.active_quest_name
         self.active_quest_objectives = event.active_quest_objectives
+        self.hostile_count = event.hostile_count
+        self.close_hostile_count = event.close_hostile_count
+        self.closest_hostile_distance = event.closest_hostile_distance
+        self.player_hp = event.player_hp
         self.last_interaction_timestamp = time.time()
 
         if event.event_type in {"player_chat", "chat_log"}:
@@ -60,6 +68,8 @@ class LiveWorldState:
             f"Instance Type: {self.instance_type}\n"
             f"Active Quest: {self.active_quest_id} {self.active_quest_name}\n"
             f"Quest Objectives: {self.active_quest_objectives or 'None'}\n"
+            f"Hostiles: {self.hostile_count} total, {self.close_hostile_count} close, closest {self.closest_hostile_distance:.0f}\n"
+            f"Player HP: {self.player_hp:.0%}\n"
             f"Recent Chat:\n{chat}\n"
             f"Recent Alerts:\n{alerts}\n"
         )

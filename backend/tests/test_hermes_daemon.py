@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from backend.hermes_daemon.daemon import event_from_game_log, extract_json_object, fallback_rule_decision
+from backend.hermes_daemon.daemon import (
+    event_from_environment_alert,
+    event_from_game_log,
+    extract_json_object,
+    fallback_rule_decision,
+)
 
 
 class HermesDaemonTests(unittest.TestCase):
@@ -63,6 +68,45 @@ class HermesDaemonTests(unittest.TestCase):
 
         self.assertIsNotNone(reply)
         self.assertEqual(reply.to_supabase_insert()["trigger_log_id"], 123)
+
+    def test_environment_alert_row_becomes_event(self) -> None:
+        event = event_from_environment_alert(
+            {
+                "id": 10,
+                "alert_type": "danger_spike",
+                "severity": "HIGH",
+                "map_id": 148,
+                "message": "3 hostile enemies are close.",
+                "agent_id": 99,
+                "distance": 800,
+                "payload": {
+                    "persona": "Azele",
+                    "hostile_count": 4,
+                    "close_hostile_count": 3,
+                    "session_id": "local-playtest",
+                },
+            }
+        )
+
+        self.assertEqual(event.event_type, "environment_alert")
+        self.assertEqual(event.alert_type, "danger_spike")
+        self.assertEqual(event.close_hostile_count, 3)
+        self.assertEqual(event.closest_hostile_distance, 800)
+
+    def test_fallback_rule_replies_to_danger_spike(self) -> None:
+        decision = fallback_rule_decision(
+            event_from_environment_alert(
+                {
+                    "alert_type": "danger_spike",
+                    "severity": "HIGH",
+                    "message": "3 hostile enemies are close.",
+                    "payload": {"close_hostile_count": 3},
+                }
+            )
+        )
+
+        self.assertTrue(decision.should_speak)
+        self.assertEqual(decision.urgency, "HIGH")
 
 
 if __name__ == "__main__":

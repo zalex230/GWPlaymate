@@ -8,7 +8,7 @@ from typing import Any
 from supabase import acreate_client
 
 from backend.shared.config import load_settings
-from backend.shared.constants import COMPANION_REPLIES_TABLE, GAME_LOGS_TABLE
+from backend.shared.constants import COMPANION_REPLIES_TABLE, ENVIRONMENT_ALERTS_TABLE, GAME_LOGS_TABLE
 from backend.shared.models import CompanionReplyInsert, HermesDecision, TelemetryEvent
 from backend.shared.state import LiveWorldState
 from backend.shared.supabase_client import create_supabase_client, require_supabase_settings
@@ -40,6 +40,48 @@ def event_from_game_log(record: dict[str, Any]) -> TelemetryEvent:
         quest_count=record.get("quest_count") or metadata.get("quest_count", 0),
         active_quest_name=record.get("active_quest_name") or metadata.get("active_quest_name", ""),
         active_quest_objectives=record.get("active_quest_objectives") or metadata.get("active_quest_objectives", ""),
+        player_x=metadata.get("player_x", record.get("player_x") or 0),
+        player_y=metadata.get("player_y", record.get("player_y") or 0),
+        player_hp=metadata.get("player_hp", 0),
+        hostile_count=metadata.get("hostile_count", 0),
+        close_hostile_count=metadata.get("close_hostile_count", 0),
+        dead_hostile_count=metadata.get("dead_hostile_count", 0),
+        closest_hostile_agent_id=metadata.get("closest_hostile_agent_id", record.get("agent_id") or 0),
+        closest_hostile_distance=metadata.get("closest_hostile_distance", record.get("distance") or 0),
+        alert_type=metadata.get("alert_type", record.get("alert_type") or ""),
+        severity=metadata.get("severity", record.get("severity") or "NORMAL"),
+        session_id=metadata.get("session_id", settings.active_session),
+    )
+
+
+def event_from_environment_alert(record: dict[str, Any]) -> TelemetryEvent:
+    metadata = record.get("payload") or {}
+    return TelemetryEvent(
+        source=metadata.get("source", "supabase-environment-alert"),
+        persona=metadata.get("persona", "Unknown Character"),
+        client_time=metadata.get("client_time"),
+        event_type="environment_alert",
+        sender="System",
+        channel="system",
+        message=record.get("message") or metadata.get("message") or record.get("alert_type") or "environment_alert",
+        map_id=record.get("map_id") or metadata.get("map_id", 0),
+        instance_type=metadata.get("instance_type", 0),
+        district=metadata.get("district", 0),
+        instance_time=metadata.get("instance_time", 0),
+        active_quest_id=metadata.get("active_quest_id", 0),
+        quest_count=metadata.get("quest_count", 0),
+        active_quest_name=metadata.get("active_quest_name", ""),
+        active_quest_objectives=metadata.get("active_quest_objectives", ""),
+        player_x=metadata.get("player_x", record.get("player_x") or 0),
+        player_y=metadata.get("player_y", record.get("player_y") or 0),
+        player_hp=metadata.get("player_hp", 0),
+        hostile_count=metadata.get("hostile_count", 0),
+        close_hostile_count=metadata.get("close_hostile_count", 0),
+        dead_hostile_count=metadata.get("dead_hostile_count", 0),
+        closest_hostile_agent_id=metadata.get("closest_hostile_agent_id", record.get("agent_id") or 0),
+        closest_hostile_distance=metadata.get("closest_hostile_distance", record.get("distance") or 0),
+        alert_type=metadata.get("alert_type", record.get("alert_type") or ""),
+        severity=metadata.get("severity", record.get("severity") or "NORMAL"),
         session_id=metadata.get("session_id", settings.active_session),
     )
 
@@ -89,6 +131,20 @@ def fallback_rule_decision(event: TelemetryEvent) -> HermesDecision:
             response="I'm here. I caught that.",
         )
     if event.event_type == "environment_alert":
+        if event.alert_type == "combat_over":
+            return HermesDecision(
+                should_speak=True,
+                channel_override="CHANNEL_PARTY",
+                urgency="LOW",
+                response="Looks clear for the moment.",
+            )
+        if event.alert_type == "danger_spike":
+            return HermesDecision(
+                should_speak=True,
+                channel_override="CHANNEL_PARTY",
+                urgency="HIGH",
+                response=f"Careful. {event.close_hostile_count} enemies are close.",
+            )
         return HermesDecision(
             should_speak=True,
             channel_override="CHANNEL_PARTY",
@@ -106,6 +162,16 @@ def insert_reply(reply: CompanionReplyInsert) -> None:
 async def handle_game_log_payload(payload: dict[str, Any], *, use_ollama: bool = False) -> None:
     record = payload.get("record") or payload
     event = event_from_game_log(record)
+    await handle_event(event, record_id=record.get("id"), use_ollama=use_ollama)
+
+
+async def handle_environment_alert_payload(payload: dict[str, Any], *, use_ollama: bool = False) -> None:
+    record = payload.get("record") or payload
+    event = event_from_environment_alert(record)
+    await handle_event(event, record_id=record.get("id"), use_ollama=use_ollama)
+
+
+async def handle_event(event: TelemetryEvent, *, record_id: int | None = None, use_ollama: bool = False) -> None:
     world_state.apply_event(event)
 
     if not world_state.can_speak(settings.hermes_min_speak_seconds):
@@ -115,7 +181,7 @@ async def handle_game_log_payload(payload: dict[str, Any], *, use_ollama: bool =
     reply = decision.to_reply(
         persona=world_state.persona,
         session_id=world_state.session_id,
-        trigger_log_id=record.get("id"),
+        trigger_log_id=record_id if event.event_type != "environment_alert" else None,
     )
     if not reply:
         return
@@ -135,6 +201,14 @@ async def subscribe_to_game_logs() -> None:
             handle_game_log_payload(payload, use_ollama=settings.hermes_use_ollama)
         ),
         table=GAME_LOGS_TABLE,
+        schema="public",
+    )
+    channel.on_postgres_changes(
+        "INSERT",
+        callback=lambda payload: asyncio.create_task(
+            handle_environment_alert_payload(payload, use_ollama=settings.hermes_use_ollama)
+        ),
+        table=ENVIRONMENT_ALERTS_TABLE,
         schema="public",
     )
     await channel.subscribe()

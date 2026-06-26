@@ -13,6 +13,7 @@ Playmate currently captures:
 - map load/change events
 - quest add/detail-change events
 - periodic map and active-quest snapshots
+- proactive environment radar alerts in explorable areas
 
 For early tuning, telemetry is written locally as JSON Lines:
 
@@ -31,12 +32,16 @@ The plugin can also POST events to a local companion service:
 
 Replies are injected locally with `GW::Chat::WriteChat`, using the active companion persona as the sender. This writes to the client chat window; it does not send a message to ArenaNet servers.
 
+The Playmate panel shows the current message lifecycle: whether the last event was accepted by the local bridge, whether the companion is waiting on Hermes/LLM interpretation, and when the last reply arrived.
+
+Environment radar sweeps run only in explorable areas. They emit transition-style `environment_alert` telemetry for nearby enemies, combat start, danger spikes, and combat ending, instead of streaming constant raw agent snapshots.
+
 ## First Playtest Workflow
 
 1. Launch Guild Wars and GWToolbox++.
 2. Open GWToolbox Settings > Plugins and load `Playmate.dll`.
 3. Open the Playmate panel and keep `Enable telemetry` and `Write local JSONL capture` enabled.
-4. Leave `Send telemetry to backend` disabled while reviewing local signal quality.
+4. Leave `Send telemetry to backend` disabled while reviewing local signal quality, or enable it when the local bridge is running.
 5. Change maps, enter an explorable area, send a few party chat lines, and let several snapshots record.
 6. Review the newest local log:
 
@@ -61,8 +66,8 @@ GW1 + GWToolbox++ Playmate plugin
 
 Next milestones:
 
-- Add environment radar events from `GW::Agents` for nearby hostile/high-threat entities.
 - Tune the client-side filter matrix so trade spam, combat noise, and ordinary item chatter stay out.
+- Decode quest/map text so payloads carry readable names instead of encoded GW strings.
 - Add rare loot and quest-state enrichment.
 - Promote the local event schema into the Supabase ingestion service once the telemetry shape is stable.
 

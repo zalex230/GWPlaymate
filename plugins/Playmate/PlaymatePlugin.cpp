@@ -2,8 +2,10 @@
 
 #include <GWCA/Constants/Constants.h>
 #include <GWCA/Context/CharContext.h>
+#include <GWCA/GameEntities/Agent.h>
 #include <GWCA/GameContainers/Array.h>
 #include <GWCA/GameEntities/Quest.h>
+#include <GWCA/Managers/AgentMgr.h>
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/QuestMgr.h>
@@ -16,10 +18,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <cwchar>
 #include <fstream>
 #include <format>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -258,6 +263,33 @@ namespace {
         GetLocalTime(&now);
         return std::format(L"{:04}-{:02}-{:02}", now.wYear, now.wMonth, now.wDay);
     }
+
+    uint64_t MonotonicMs()
+    {
+        return GetTickCount64();
+    }
+
+    float Distance2D(const GW::GamePos& a, const GW::GamePos& b)
+    {
+        const float dx = a.x - b.x;
+        const float dy = a.y - b.y;
+        return std::sqrt(dx * dx + dy * dy);
+    }
+
+    const char* AgeText(const uint64_t timestamp_ms, char* buffer, const size_t buffer_size)
+    {
+        if (!timestamp_ms) {
+            strncpy_s(buffer, buffer_size, "never", _TRUNCATE);
+            return buffer;
+        }
+        const auto age_ms = MonotonicMs() - timestamp_ms;
+        if (age_ms < 1000) {
+            strncpy_s(buffer, buffer_size, "now", _TRUNCATE);
+            return buffer;
+        }
+        snprintf(buffer, buffer_size, "%.1fs ago", static_cast<double>(age_ms) / 1000.0);
+        return buffer;
+    }
 }
 
 DLLAPI ToolboxPlugin* ToolboxPluginInstance()
@@ -318,10 +350,12 @@ void PlaymatePlugin::LoadSettings(const wchar_t* folder)
     LoadSetting("local_capture", local_capture_);
     LoadSetting("send_to_backend", send_to_backend_);
     LoadSetting("inject_replies", inject_replies_);
+    LoadSetting("environment_radar", environment_radar_);
     LoadSetting("backend_url", backend_url);
     LoadSetting("api_token", api_token);
     LoadSetting("poll_interval_sec", poll_interval_sec_);
     LoadSetting("snapshot_interval_sec", snapshot_interval_sec_);
+    LoadSetting("radar_interval_sec", radar_interval_sec_);
 
     strncpy_s(backend_url_input_, backend_url.c_str(), _TRUNCATE);
     strncpy_s(api_token_input_, api_token.c_str(), _TRUNCATE);
@@ -333,6 +367,7 @@ void PlaymatePlugin::LoadSettings(const wchar_t* folder)
     }
     poll_interval_sec_ = std::clamp(poll_interval_sec_, 0.25f, 30.0f);
     snapshot_interval_sec_ = std::clamp(snapshot_interval_sec_, 1.0f, 120.0f);
+    radar_interval_sec_ = std::clamp(radar_interval_sec_, 2.0f, 30.0f);
     ApplyConfig();
 }
 
@@ -342,10 +377,12 @@ void PlaymatePlugin::SaveSettings(const wchar_t* folder)
     SaveSetting("local_capture", local_capture_);
     SaveSetting("send_to_backend", send_to_backend_);
     SaveSetting("inject_replies", inject_replies_);
+    SaveSetting("environment_radar", environment_radar_);
     SaveSetting("backend_url", std::string(backend_url_input_));
     SaveSetting("api_token", std::string(api_token_input_));
     SaveSetting("poll_interval_sec", poll_interval_sec_);
     SaveSetting("snapshot_interval_sec", snapshot_interval_sec_);
+    SaveSetting("radar_interval_sec", radar_interval_sec_);
     ToolboxUIPlugin::SaveSettings(folder);
 }
 
@@ -356,10 +393,12 @@ void PlaymatePlugin::DrawSettings()
     config_changed |= ImGui::Checkbox("Write local JSONL capture", &local_capture_);
     config_changed |= ImGui::Checkbox("Send telemetry to backend", &send_to_backend_);
     config_changed |= ImGui::Checkbox("Inject companion replies into party chat", &inject_replies_);
+    config_changed |= ImGui::Checkbox("Enable environment radar", &environment_radar_);
     config_changed |= ImGui::InputText("Local backend URL", backend_url_input_, sizeof(backend_url_input_));
     config_changed |= ImGui::InputText("Local API token", api_token_input_, sizeof(api_token_input_), ImGuiInputTextFlags_Password);
     config_changed |= ImGui::SliderFloat("Reply poll interval", &poll_interval_sec_, 0.25f, 10.0f, "%.2fs");
     config_changed |= ImGui::SliderFloat("Snapshot interval", &snapshot_interval_sec_, 1.0f, 60.0f, "%.0fs");
+    config_changed |= ImGui::SliderFloat("Radar interval", &radar_interval_sec_, 2.0f, 15.0f, "%.1fs");
     if (config_changed) {
         ApplyConfig();
     }
@@ -367,6 +406,18 @@ void PlaymatePlugin::DrawSettings()
     std::lock_guard lock(status_mutex_);
     ImGui::Separator();
     ImGui::Text("Status: %s", status_.c_str());
+    ImGui::TextWrapped("Last event: %s", last_event_status_.c_str());
+    if (waiting_for_reply_) {
+        char age[32] = {};
+        ImGui::Text("Companion: waiting for reply (%s)", AgeText(waiting_since_ms_, age, sizeof(age)));
+    }
+    else {
+        ImGui::Text("Companion: idle");
+    }
+    ImGui::TextWrapped("Last reply: %s", last_reply_status_.c_str());
+    if (!last_backend_error_.empty()) {
+        ImGui::TextWrapped("Last backend error: %s", last_backend_error_.c_str());
+    }
     const auto persona = CurrentPersonaName();
     ImGui::Text("Persona: %s", persona.c_str());
     const auto log_path = WideToUtf8(LocalLogPath().wstring().c_str());
@@ -400,6 +451,7 @@ void PlaymatePlugin::Update(const float delta_ms)
     }
 
     snapshot_elapsed_ms_ += delta_ms;
+    radar_elapsed_ms_ += delta_ms;
     const Snapshot snapshot = BuildSnapshot();
     const bool map_changed = snapshot.map_id != 0 && snapshot.map_id != last_map_id_;
     const bool quest_changed = snapshot.active_quest_id != last_active_quest_id_;
@@ -409,6 +461,10 @@ void PlaymatePlugin::Update(const float delta_ms)
         snapshot_elapsed_ms_ = 0.0f;
         last_map_id_ = snapshot.map_id;
         last_active_quest_id_ = snapshot.active_quest_id;
+    }
+    if (radar_elapsed_ms_ >= radar_interval_sec_ * 1000.0f) {
+        radar_elapsed_ms_ = 0.0f;
+        MaybeQueueEnvironmentAlert();
     }
 }
 
@@ -488,9 +544,18 @@ void PlaymatePlugin::WorkerLoop()
             }
             if (posted_remote) {
                 ++sent_count_;
+                last_sent_ms_ = MonotonicMs();
+                last_backend_error_.clear();
+                last_event_status_ = std::format("{} accepted by bridge", event.event_type);
+                if (event.event_type == "player_chat" || event.event_type == "environment_alert") {
+                    waiting_for_reply_ = true;
+                    waiting_since_ms_ = last_sent_ms_;
+                    last_reply_status_ = "Waiting for Hermes";
+                }
             }
             if (failed) {
                 ++failed_count_;
+                last_event_status_ = std::format("{} failed", event.event_type);
                 if (wrote_local) {
                     status_ = "Captured locally; backend failed";
                 }
@@ -556,7 +621,12 @@ bool PlaymatePlugin::PostTelemetry(const TelemetryEvent& event)
     request.SetPostContent(json, ContentFlag::Copy);
     const bool ok = request.Perform() && request.GetStatusCode() >= 200 && request.GetStatusCode() < 300;
     if (!ok) {
-        SetStatus(std::format("POST failed: {} HTTP {}", request.GetStatusStr(), request.GetStatusCode()));
+        const auto error = std::format("POST failed: {} HTTP {}", request.GetStatusStr(), request.GetStatusCode());
+        {
+            std::lock_guard lock(status_mutex_);
+            last_backend_error_ = error;
+        }
+        SetStatus(error);
     }
     return ok;
 }
@@ -640,9 +710,96 @@ void PlaymatePlugin::QueueTelemetry(std::string event_type, std::string sender, 
     queue_cv_.notify_one();
 }
 
+void PlaymatePlugin::QueueEnvironmentAlert(std::string alert_type, std::string severity, std::string message, const EnvironmentScan& scan)
+{
+    if (!telemetry_enabled_.load() || (!local_capture_enabled_.load() && !backend_enabled_.load()) || message.empty()) {
+        return;
+    }
+
+    const Snapshot snapshot = BuildSnapshot();
+    TelemetryEvent event;
+    event.persona = CurrentPersonaName();
+    event.client_time = CurrentUtcTimestamp();
+    event.event_type = "environment_alert";
+    event.sender = "System";
+    event.channel = "system";
+    event.message = std::move(message);
+    event.map_id = snapshot.map_id;
+    event.instance_type = snapshot.instance_type;
+    event.district = snapshot.district;
+    event.instance_time = snapshot.instance_time;
+    event.active_quest_id = snapshot.active_quest_id;
+    event.quest_count = snapshot.quest_count;
+    event.active_quest_name = snapshot.active_quest_name;
+    event.active_quest_objectives = snapshot.active_quest_objectives;
+    event.player_x = scan.player_x;
+    event.player_y = scan.player_y;
+    event.player_hp = scan.player_hp;
+    event.hostile_count = scan.hostile_count;
+    event.close_hostile_count = scan.close_hostile_count;
+    event.dead_hostile_count = scan.dead_hostile_count;
+    event.closest_hostile_agent_id = scan.closest_hostile_agent_id;
+    event.closest_hostile_distance = scan.closest_hostile_distance;
+    event.alert_type = std::move(alert_type);
+    event.severity = std::move(severity);
+
+    {
+        std::lock_guard lock(queue_mutex_);
+        if (outbound_.size() >= 256) {
+            outbound_.pop_front();
+        }
+        outbound_.push_back(std::move(event));
+    }
+    queue_cv_.notify_one();
+}
+
 void PlaymatePlugin::QueueSnapshotEvent(const char* event_type)
 {
     QueueTelemetry(event_type, "System", "system", event_type);
+}
+
+void PlaymatePlugin::MaybeQueueEnvironmentAlert()
+{
+    if (!environment_radar_enabled_.load()) {
+        return;
+    }
+    const EnvironmentScan scan = BuildEnvironmentScan();
+    if (!scan.valid) {
+        last_hostile_count_ = 0;
+        last_close_hostile_count_ = 0;
+        last_in_combat_ = false;
+        return;
+    }
+
+    const bool entered_close_range = scan.close_hostile_count > 0 && last_close_hostile_count_ == 0;
+    const bool danger_spike = scan.close_hostile_count >= 3 && scan.close_hostile_count > last_close_hostile_count_;
+    const bool combat_started = scan.in_combat && !last_in_combat_;
+    const bool combat_ended = !scan.in_combat && last_in_combat_ && scan.hostile_count == 0;
+
+    if (danger_spike) {
+        QueueEnvironmentAlert(
+            "danger_spike",
+            "HIGH",
+            std::format("{} hostile enemies are close.", scan.close_hostile_count),
+            scan);
+    }
+    else if (combat_started) {
+        QueueEnvironmentAlert("combat_started", "HIGH", "Combat started.", scan);
+    }
+    else if (entered_close_range) {
+        QueueEnvironmentAlert(
+            "enemy_patrol_nearby",
+            "NORMAL",
+            std::format("Enemy nearby at {:.0f} range.", scan.closest_hostile_distance),
+            scan);
+    }
+    else if (combat_ended) {
+        QueueEnvironmentAlert("combat_over", "LOW", "Combat ended.", scan);
+    }
+
+    last_hostile_count_ = scan.hostile_count;
+    last_close_hostile_count_ = scan.close_hostile_count;
+    last_in_combat_ = scan.in_combat;
 }
 
 void PlaymatePlugin::QueueReply(std::wstring reply)
@@ -672,6 +829,9 @@ void PlaymatePlugin::FlushRepliesToChat()
         GW::Chat::WriteChat(GW::Chat::CHANNEL_GROUP, reply.c_str(), persona.c_str(), true);
         std::lock_guard lock(status_mutex_);
         ++received_count_;
+        waiting_for_reply_ = false;
+        last_reply_ms_ = MonotonicMs();
+        last_reply_status_ = "Reply received";
     }
 }
 
@@ -683,7 +843,9 @@ void PlaymatePlugin::ApplyConfig()
     local_capture_enabled_.store(local_capture_);
     backend_enabled_.store(send_to_backend_);
     reply_injection_enabled_.store(inject_replies_);
+    environment_radar_enabled_.store(environment_radar_);
     poll_interval_ms_.store(static_cast<int>(poll_interval_sec_ * 1000.0f));
+    radar_interval_sec_ = std::clamp(radar_interval_sec_, 2.0f, 30.0f);
     std::lock_guard lock(config_mutex_);
     backend_url_ = TrimTrailingSlash(backend_url_input_);
     api_token_ = api_token_input_;
@@ -718,6 +880,62 @@ PlaymatePlugin::Snapshot PlaymatePlugin::BuildSnapshot() const
         snapshot.active_quest_objectives = WideToUtf8(quest->objectives);
     }
     return snapshot;
+}
+
+PlaymatePlugin::EnvironmentScan PlaymatePlugin::BuildEnvironmentScan() const
+{
+    EnvironmentScan scan;
+    if (!GW::Map::GetIsMapLoaded() || GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) {
+        return scan;
+    }
+
+    GW::AgentArray* agents = GW::Agents::GetAgentArray();
+    const GW::AgentLiving* me = agents ? GW::Agents::GetControlledCharacter() : nullptr;
+    if (!agents || !me) {
+        return scan;
+    }
+
+    scan.valid = true;
+    scan.player_x = me->pos.x;
+    scan.player_y = me->pos.y;
+    scan.player_hp = me->hp;
+    scan.closest_hostile_distance = std::numeric_limits<float>::max();
+
+    for (const GW::Agent* agent : *agents) {
+        if (!agent || agent == me || !GW::Agents::GetAgentMatchesFlags(agent, GW::TargetFilter::AnyLiving)) {
+            continue;
+        }
+        const GW::AgentLiving* living = agent->GetAsAgentLiving();
+        if (!living || living->allegiance != GW::Constants::Allegiance::Enemy) {
+            continue;
+        }
+
+        if (!living->GetIsAlive()) {
+            ++scan.dead_hostile_count;
+            continue;
+        }
+
+        const float distance = Distance2D(me->pos, living->pos);
+        if (distance > GW::Constants::Range::Compass) {
+            continue;
+        }
+
+        ++scan.hostile_count;
+        if (distance <= 1500.0f) {
+            ++scan.close_hostile_count;
+        }
+        if (distance < scan.closest_hostile_distance) {
+            scan.closest_hostile_distance = distance;
+            scan.closest_hostile_agent_id = living->agent_id;
+        }
+        scan.in_combat = scan.in_combat || living->GetInCombatStance() || living->GetIsAttacking() || living->GetIsCasting();
+    }
+
+    if (scan.closest_hostile_distance == std::numeric_limits<float>::max()) {
+        scan.closest_hostile_distance = 0.0f;
+    }
+    scan.in_combat = scan.in_combat || me->GetInCombatStance() || scan.close_hostile_count > 0;
+    return scan;
 }
 
 std::string PlaymatePlugin::CurrentPersonaName() const

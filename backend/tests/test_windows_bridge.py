@@ -84,6 +84,29 @@ class WindowsBridgeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"accepted": True})
 
+    def test_post_event_routes_environment_alert(self) -> None:
+        client = TestClient(app)
+        payload = {
+            "source": "gwtoolboxpp-playmate",
+            "persona": "A Test",
+            "client_time": "2026-06-26T12:00:00Z",
+            "event_type": "environment_alert",
+            "sender": "System",
+            "channel": "system",
+            "message": "Enemy nearby.",
+            "alert_type": "enemy_patrol_nearby",
+            "severity": "NORMAL",
+            "map_id": 148,
+            "hostile_count": 2,
+            "close_hostile_count": 1,
+        }
+
+        with patch("backend.windows_bridge.app._client", return_value=_FakeSupabase()):
+            response = client.post("/v1/playmate/events", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"accepted": True})
+
 
 if __name__ == "__main__":
     unittest.main()

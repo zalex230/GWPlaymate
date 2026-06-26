@@ -63,10 +63,33 @@ private:
         uint32_t quest_count = 0;
         std::string active_quest_name;
         std::string active_quest_objectives;
+        float player_x = 0.0f;
+        float player_y = 0.0f;
+        float player_hp = 0.0f;
+        uint32_t hostile_count = 0;
+        uint32_t close_hostile_count = 0;
+        uint32_t dead_hostile_count = 0;
+        uint32_t closest_hostile_agent_id = 0;
+        float closest_hostile_distance = 0.0f;
+        std::string alert_type;
+        std::string severity;
     };
 
     struct RepliesResponse {
         std::vector<std::string> replies;
+    };
+
+    struct EnvironmentScan {
+        bool valid = false;
+        float player_x = 0.0f;
+        float player_y = 0.0f;
+        float player_hp = 0.0f;
+        uint32_t hostile_count = 0;
+        uint32_t close_hostile_count = 0;
+        uint32_t dead_hostile_count = 0;
+        uint32_t closest_hostile_agent_id = 0;
+        float closest_hostile_distance = 0.0f;
+        bool in_combat = false;
     };
 
     void RegisterHooks();
@@ -78,13 +101,16 @@ private:
     bool PostTelemetry(const TelemetryEvent& event);
     void PollReplies();
     void QueueTelemetry(std::string event_type, std::string sender, std::string channel, std::string message);
+    void QueueEnvironmentAlert(std::string alert_type, std::string severity, std::string message, const EnvironmentScan& scan);
     void QueueSnapshotEvent(const char* event_type);
+    void MaybeQueueEnvironmentAlert();
     void QueueReply(std::wstring reply);
     void FlushRepliesToChat();
     void ApplyConfig();
     void SetStatus(std::string status);
 
     [[nodiscard]] Snapshot BuildSnapshot() const;
+    [[nodiscard]] EnvironmentScan BuildEnvironmentScan() const;
     [[nodiscard]] std::string CurrentPersonaName() const;
     [[nodiscard]] std::wstring CurrentPersonaNameWide() const;
     [[nodiscard]] std::pair<std::string, std::string> GetConfig() const;
@@ -101,13 +127,16 @@ private:
     bool local_capture_ = true;
     bool send_to_backend_ = false;
     bool inject_replies_ = true;
+    bool environment_radar_ = true;
     std::atomic_bool telemetry_enabled_ = true;
     std::atomic_bool local_capture_enabled_ = true;
     std::atomic_bool backend_enabled_ = false;
     std::atomic_bool reply_injection_enabled_ = true;
+    std::atomic_bool environment_radar_enabled_ = true;
     std::atomic<int> poll_interval_ms_ = 1000;
     float poll_interval_sec_ = 1.0f;
     float snapshot_interval_sec_ = 8.0f;
+    float radar_interval_sec_ = 3.0f;
     char backend_url_input_[256] = "http://127.0.0.1:8787";
     char api_token_input_[160] = "";
 
@@ -125,14 +154,25 @@ private:
 
     mutable std::mutex status_mutex_;
     std::string status_ = "Idle";
+    std::string last_event_status_ = "No events sent yet";
+    std::string last_reply_status_ = "No replies yet";
+    std::string last_backend_error_;
     size_t local_written_count_ = 0;
     size_t sent_count_ = 0;
     size_t failed_count_ = 0;
     size_t received_count_ = 0;
+    bool waiting_for_reply_ = false;
+    uint64_t waiting_since_ms_ = 0;
+    uint64_t last_sent_ms_ = 0;
+    uint64_t last_reply_ms_ = 0;
 
     float snapshot_elapsed_ms_ = 0.0f;
+    float radar_elapsed_ms_ = 0.0f;
     uint32_t last_map_id_ = 0;
     uint32_t last_active_quest_id_ = 0;
+    uint32_t last_hostile_count_ = 0;
+    uint32_t last_close_hostile_count_ = 0;
+    bool last_in_combat_ = false;
 
     GW::HookEntry send_chat_entry_;
     GW::HookEntry write_chat_entry_;

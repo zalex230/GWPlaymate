@@ -70,6 +70,8 @@ python -m backend.hermes_daemon.daemon
 ```
 
 The daemon listens for `INSERT` events on `public.game_logs` using Supabase Postgres Changes. It keeps recent context in RAM, asks Ollama for a small JSON decision, and inserts approved lines into `companion_replies`.
+It also listens for `INSERT` events on `public.environment_alerts` so proactive radar events from the
+plugin can trigger companion comments without a player chat prompt.
 
 For the first closed-loop test, leave `HERMES_USE_OLLAMA=false`. In this fallback mode Hermes replies
 deterministically to party `player_chat` rows, which proves the Supabase round trip without involving
@@ -97,6 +99,19 @@ Expected result:
 
 After that passes, run the same loop from GW1 by enabling `Send telemetry to backend` and `Inject
 companion replies into party chat` in the Playmate panel.
+
+## Proactive radar
+
+The plugin can emit `environment_alert` telemetry while in explorable areas. V1 alerts are transition
+based rather than continuous spam:
+
+- `enemy_patrol_nearby` when a living enemy enters close range;
+- `combat_started` when combat-like state begins;
+- `danger_spike` when several enemies are close;
+- `combat_over` when combat clears.
+
+These alerts are stored in `environment_alerts`; Hermes consumes them through Realtime and writes any
+companion line to `companion_replies`.
 
 ## Supabase
 

@@ -24,6 +24,16 @@ class TelemetryEvent(BaseModel):
     quest_count: int = 0
     active_quest_name: str = ""
     active_quest_objectives: str = ""
+    player_x: float = 0.0
+    player_y: float = 0.0
+    player_hp: float = 0.0
+    hostile_count: int = 0
+    close_hostile_count: int = 0
+    dead_hostile_count: int = 0
+    closest_hostile_agent_id: int = 0
+    closest_hostile_distance: float = 0.0
+    alert_type: str = ""
+    severity: str = "NORMAL"
     session_id: str = "local-playtest"
 
     @field_validator("event_type", "sender", "channel", "message")
@@ -57,6 +67,16 @@ class TelemetryEvent(BaseModel):
             "quest_count": self.quest_count,
             "active_quest_name": self.active_quest_name,
             "active_quest_objectives": self.active_quest_objectives,
+            "player_x": self.player_x,
+            "player_y": self.player_y,
+            "player_hp": self.player_hp,
+            "hostile_count": self.hostile_count,
+            "close_hostile_count": self.close_hostile_count,
+            "dead_hostile_count": self.dead_hostile_count,
+            "closest_hostile_agent_id": self.closest_hostile_agent_id,
+            "closest_hostile_distance": self.closest_hostile_distance,
+            "alert_type": self.alert_type,
+            "severity": self.severity,
             "session_id": self.session_id,
         }
 
@@ -81,9 +101,14 @@ class TelemetryEvent(BaseModel):
     def to_environment_alert_insert(self) -> dict[str, Any]:
         metadata = self.metadata()
         return {
-            "alert_type": self.event_type,
-            "severity": str(metadata.get("severity") or "NORMAL"),
+            "alert_type": self.alert_type or self.event_type,
+            "severity": self.severity or "NORMAL",
             "map_id": self.map_id or None,
+            "player_x": self.player_x or None,
+            "player_y": self.player_y or None,
+            "agent_id": self.closest_hostile_agent_id or None,
+            "distance": self.closest_hostile_distance or None,
+            "faction": "enemy" if self.hostile_count else None,
             "message": self.message,
             "payload": metadata,
         }
