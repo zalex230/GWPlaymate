@@ -13,9 +13,10 @@ from backend.shared.constants import (
     ENVIRONMENT_EVENT_TYPES,
     GAME_LOGS_TABLE,
     NOISY_CHANNELS,
+    SUPPRESSED_EVENT_TYPES,
 )
 from backend.shared.models import CompanionReplyRow, RepliesResponse, TelemetryEvent
-from backend.shared.supabase_client import create_supabase_client
+from backend.shared.supabase_client import create_supabase_client, require_supabase_settings
 from backend.shared.throttle import EventThrottle
 
 
@@ -29,12 +30,14 @@ def _client():
 
 
 def _insert_event(event: TelemetryEvent) -> dict[str, Any]:
-    client = _client()
     if event.channel in NOISY_CHANNELS:
         return {"accepted": False, "reason": "noisy_channel"}
+    if event.event_type in SUPPRESSED_EVENT_TYPES:
+        return {"accepted": False, "reason": "suppressed_event_type"}
     if not throttle.should_accept(event):
         return {"accepted": False, "reason": "throttled"}
 
+    client = _client()
     if event.event_type in ENVIRONMENT_EVENT_TYPES:
         client.table(ENVIRONMENT_ALERTS_TABLE).insert(event.to_environment_alert_insert()).execute()
     else:
@@ -48,6 +51,7 @@ def health() -> dict[str, Any]:
         "ok": True,
         "service": "gwplaymate-windows-bridge",
         "supabase_project": "akijihvbqemiqpbeknnr",
+        "supabase_configured": bool(settings.supabase_url and settings.supabase_service_key),
     }
 
 
@@ -87,6 +91,7 @@ def get_replies(persona: str | None = None, session_id: str | None = None, limit
 
 
 def main() -> None:
+    require_supabase_settings(settings)
     uvicorn.run("backend.windows_bridge.app:app", host=settings.host, port=settings.port, reload=False)
 
 

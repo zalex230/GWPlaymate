@@ -19,5 +19,8 @@ $event = @{
     session_id = "local-playtest"
 } | ConvertTo-Json
 
+Write-Host "Posting synthetic player_chat event to Windows bridge..."
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8787/v1/playmate/events" -Body $event -ContentType "application/json"
+
+Write-Host "Polling replies. If Hermes is running, this should return at most one fallback reply."
 Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8787/v1/playmate/replies"

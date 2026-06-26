@@ -15,6 +15,7 @@ ENVIRONMENT_EVENT_TYPES = {"environment_alert"}
 
 CHAT_CHANNELS = {"party", "local", "guild", "alliance", "whisper", "system", "warning", "emote"}
 NOISY_CHANNELS = {"trade"}
+SUPPRESSED_EVENT_TYPES = {"quest_added", "quest_details_changed"}
 
 GAME_LOGS_TABLE = "game_logs"
 ENVIRONMENT_ALERTS_TABLE = "environment_alerts"

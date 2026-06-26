@@ -34,6 +34,7 @@ class HermesDaemonTests(unittest.TestCase):
         decision = fallback_rule_decision(
             event_from_game_log(
                 {
+                    "id": 123,
                     "sender": "Player",
                     "channel": "party",
                     "message": "hello",
@@ -44,6 +45,24 @@ class HermesDaemonTests(unittest.TestCase):
 
         self.assertTrue(decision.should_speak)
         self.assertEqual(decision.channel_override, "CHANNEL_PARTY")
+
+    def test_reply_can_include_trigger_log_id(self) -> None:
+        decision = fallback_rule_decision(
+            event_from_game_log(
+                {
+                    "id": 123,
+                    "sender": "Player",
+                    "channel": "party",
+                    "message": "hello",
+                    "metadata": {"event_type": "player_chat"},
+                }
+            )
+        )
+
+        reply = decision.to_reply("A Test", "session", trigger_log_id=123)
+
+        self.assertIsNotNone(reply)
+        self.assertEqual(reply.to_supabase_insert()["trigger_log_id"], 123)
 
 
 if __name__ == "__main__":

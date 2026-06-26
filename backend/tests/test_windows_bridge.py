@@ -48,6 +48,23 @@ class WindowsBridgeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"accepted": True})
 
+    def test_post_event_suppresses_noisy_quest_details(self) -> None:
+        client = TestClient(app)
+        payload = {
+            "source": "gwtoolboxpp-playmate",
+            "persona": "A Test",
+            "client_time": "2026-06-26T12:00:00Z",
+            "event_type": "quest_details_changed",
+            "sender": "System",
+            "channel": "system",
+            "message": "quest_details_changed",
+        }
+
+        response = client.post("/v1/playmate/events", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"accepted": False, "reason": "suppressed_event_type"})
+
 
 if __name__ == "__main__":
     unittest.main()

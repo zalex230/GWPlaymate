@@ -5,14 +5,13 @@ import json
 import re
 from typing import Any
 
-import ollama
 from supabase import acreate_client
 
 from backend.shared.config import load_settings
 from backend.shared.constants import COMPANION_REPLIES_TABLE, GAME_LOGS_TABLE
 from backend.shared.models import CompanionReplyInsert, HermesDecision, TelemetryEvent
 from backend.shared.state import LiveWorldState
-from backend.shared.supabase_client import create_supabase_client
+from backend.shared.supabase_client import create_supabase_client, require_supabase_settings
 
 
 settings = load_settings()
@@ -69,6 +68,8 @@ def build_decision_prompt(event: TelemetryEvent) -> str:
 
 
 def decide_with_ollama(event: TelemetryEvent) -> HermesDecision:
+    import ollama
+
     prompt = build_decision_prompt(event)
     response = ollama.generate(
         model=settings.ollama_model,
@@ -102,7 +103,7 @@ def insert_reply(reply: CompanionReplyInsert) -> None:
     client.table(COMPANION_REPLIES_TABLE).insert(reply.to_supabase_insert()).execute()
 
 
-async def handle_game_log_payload(payload: dict[str, Any], *, use_ollama: bool = True) -> None:
+async def handle_game_log_payload(payload: dict[str, Any], *, use_ollama: bool = False) -> None:
     record = payload.get("record") or payload
     event = event_from_game_log(record)
     world_state.apply_event(event)
@@ -111,7 +112,11 @@ async def handle_game_log_payload(payload: dict[str, Any], *, use_ollama: bool =
         return
 
     decision = decide_with_ollama(event) if use_ollama else fallback_rule_decision(event)
-    reply = decision.to_reply(persona=world_state.persona, session_id=world_state.session_id)
+    reply = decision.to_reply(
+        persona=world_state.persona,
+        session_id=world_state.session_id,
+        trigger_log_id=record.get("id"),
+    )
     if not reply:
         return
 
@@ -120,16 +125,15 @@ async def handle_game_log_payload(payload: dict[str, Any], *, use_ollama: bool =
 
 
 async def subscribe_to_game_logs() -> None:
-    if not settings.supabase_url:
-        raise RuntimeError("SUPABASE_URL is required")
-    if not settings.supabase_service_key:
-        raise RuntimeError("SUPABASE_SERVICE_KEY is required")
+    require_supabase_settings(settings)
 
     client = await acreate_client(settings.supabase_url, settings.supabase_service_key)
     channel = client.channel("gwplaymate-game-logs")
     channel.on_postgres_changes(
         "INSERT",
-        callback=lambda payload: asyncio.create_task(handle_game_log_payload(payload)),
+        callback=lambda payload: asyncio.create_task(
+            handle_game_log_payload(payload, use_ollama=settings.hermes_use_ollama)
+        ),
         table=GAME_LOGS_TABLE,
         schema="public",
     )
@@ -137,8 +141,10 @@ async def subscribe_to_game_logs() -> None:
 
 
 async def main_async() -> None:
+    require_supabase_settings(settings)
     await subscribe_to_game_logs()
-    print("GWPlaymate Hermes daemon listening for Supabase game_logs inserts.")
+    mode = "Ollama" if settings.hermes_use_ollama else "fallback rules"
+    print(f"GWPlaymate Hermes daemon listening for Supabase game_logs inserts ({mode}).")
     while True:
         await asyncio.sleep(1)
 

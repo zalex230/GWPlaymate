@@ -95,10 +95,11 @@ class CompanionReplyInsert(BaseModel):
     channel: str = "party"
     session_id: str = "local-playtest"
     urgency: str = "NORMAL"
+    trigger_log_id: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_supabase_insert(self) -> dict[str, Any]:
-        return {
+        row = {
             "persona": self.persona,
             "message": self.message,
             "channel": self.channel,
@@ -108,6 +109,10 @@ class CompanionReplyInsert(BaseModel):
                 **self.metadata,
             },
         }
+        if self.trigger_log_id is not None:
+            row["trigger_log_id"] = self.trigger_log_id
+            row["payload"]["trigger_log_id"] = self.trigger_log_id
+        return row
 
 
 class CompanionReplyRow(BaseModel):
@@ -141,7 +146,12 @@ class HermesDecision(BaseModel):
     def trim_response(cls, value: str) -> str:
         return value.strip()
 
-    def to_reply(self, persona: str, session_id: str) -> CompanionReplyInsert | None:
+    def to_reply(
+        self,
+        persona: str,
+        session_id: str,
+        trigger_log_id: int | None = None,
+    ) -> CompanionReplyInsert | None:
         if not self.should_speak or not self.response:
             return None
         channel_map = {
@@ -155,6 +165,7 @@ class HermesDecision(BaseModel):
             channel=channel_map[self.channel_override],
             session_id=session_id,
             urgency=self.urgency,
+            trigger_log_id=trigger_log_id,
             metadata={"channel_override": self.channel_override},
         )
 

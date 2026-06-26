@@ -39,6 +39,18 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(reply.channel, "party")
         self.assertEqual(reply.urgency, "HIGH")
 
+    def test_reply_insert_includes_trigger_log_id(self) -> None:
+        decision = HermesDecision(
+            should_speak=True,
+            channel_override="CHANNEL_PARTY",
+            response="Hold up.",
+        )
+
+        row = decision.to_reply("A Test", "session", trigger_log_id=7).to_supabase_insert()
+
+        self.assertEqual(row["trigger_log_id"], 7)
+        self.assertEqual(row["payload"]["trigger_log_id"], 7)
+
 
 if __name__ == "__main__":
     unittest.main()

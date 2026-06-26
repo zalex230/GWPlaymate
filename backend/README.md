@@ -35,6 +35,9 @@ Copy-Item backend\.env.example backend\.env
 
 The Supabase project is `GWPlaymate` / `akijihvbqemiqpbeknnr`.
 
+Use the `service_role` key only in `backend/.env` on trusted machines. Do not put Supabase keys in the
+GWToolbox plugin UI, the DLL, or committed files.
+
 ## Windows Bridge
 
 Run this on the Gaming PC:
@@ -48,6 +51,9 @@ Then in the Playmate plugin:
 - `Local backend URL`: `http://127.0.0.1:8787`
 - `Write local JSONL capture`: on
 - `Send telemetry to backend`: on, after local logs look sane
+
+The bridge rejects known noisy event types before touching Supabase. For v1 this suppresses
+`quest_added` and `quest_details_changed` until quest text decoding and de-duplication are fixed.
 
 Smoke test without GW1:
 
@@ -64,6 +70,33 @@ python -m backend.hermes_daemon.daemon
 ```
 
 The daemon listens for `INSERT` events on `public.game_logs` using Supabase Postgres Changes. It keeps recent context in RAM, asks Ollama for a small JSON decision, and inserts approved lines into `companion_replies`.
+
+For the first closed-loop test, leave `HERMES_USE_OLLAMA=false`. In this fallback mode Hermes replies
+deterministically to party `player_chat` rows, which proves the Supabase round trip without involving
+model setup. Set `HERMES_USE_OLLAMA=true` when the pipe is proven and Ollama is ready on the Mac Mini.
+
+Replies are written to `companion_replies`, not back into `game_logs`, and include `trigger_log_id`
+when the source Supabase row is available.
+
+## Closed-loop smoke test
+
+1. Start the Windows bridge.
+2. Start the Mac Mini Hermes daemon with `HERMES_USE_OLLAMA=false`.
+3. From the Windows PC, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File backend\scripts\smoke-test-bridge.ps1
+```
+
+Expected result:
+
+- the bridge returns `{ "accepted": true }` for the synthetic `player_chat`;
+- Supabase receives one `game_logs` row;
+- Hermes inserts one `companion_replies` row;
+- the bridge returns that reply once from `GET /v1/playmate/replies` and marks it consumed.
+
+After that passes, run the same loop from GW1 by enabling `Send telemetry to backend` and `Inject
+companion replies into party chat` in the Playmate panel.
 
 ## Supabase
 

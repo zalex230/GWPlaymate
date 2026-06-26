@@ -25,6 +25,13 @@ def _float_env(name: str, default: float) -> float:
     return float(value)
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class BackendSettings:
     supabase_url: str = os.getenv("SUPABASE_URL", "")
@@ -37,6 +44,7 @@ class BackendSettings:
     snapshot_min_interval_seconds: float = _float_env("PLAYMATE_SNAPSHOT_MIN_INTERVAL_SECONDS", 8.0)
     ollama_host: str = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "gemma3:12b")
+    hermes_use_ollama: bool = _bool_env("HERMES_USE_OLLAMA", False)
     hermes_min_speak_seconds: float = _float_env("HERMES_MIN_SPEAK_SECONDS", 20.0)
     recent_chat_limit: int = _int_env("HERMES_RECENT_CHAT_LIMIT", 10)
     recent_alert_limit: int = _int_env("HERMES_RECENT_ALERT_LIMIT", 8)
