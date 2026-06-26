@@ -65,6 +65,25 @@ class WindowsBridgeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"accepted": False, "reason": "suppressed_event_type"})
 
+    def test_post_event_accepts_control_char_in_quest_payload(self) -> None:
+        client = TestClient(app)
+        payload = (
+            '{"source":"gwtoolboxpp-playmate","persona":"A Test",'
+            '"client_time":"2026-06-26T12:00:00Z","event_type":"player_chat",'
+            '"sender":"Player","channel":"party","message":"hello",'
+            '"active_quest_objectives":"encoded\u0001quest"}'
+        )
+
+        with patch("backend.windows_bridge.app._client", return_value=_FakeSupabase()):
+            response = client.post(
+                "/v1/playmate/events",
+                content=payload.encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"accepted": True})
+
 
 if __name__ == "__main__":
     unittest.main()

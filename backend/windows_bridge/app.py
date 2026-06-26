@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from json import JSONDecodeError
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import ValidationError
 
 from backend.shared.config import load_settings
 from backend.shared.constants import (
@@ -45,6 +48,24 @@ def _insert_event(event: TelemetryEvent) -> dict[str, Any]:
     return {"accepted": True}
 
 
+def _strip_invalid_json_control_chars(text: str) -> str:
+    return "".join(ch for ch in text if ch in "\t\n\r" or ord(ch) >= 0x20)
+
+
+async def _event_from_request(request: Request) -> TelemetryEvent:
+    raw = await request.body()
+    text = raw.decode("utf-8", errors="replace")
+    text = _strip_invalid_json_control_chars(text)
+    try:
+        payload = json.loads(text)
+    except JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid telemetry JSON: {exc.msg}") from exc
+    try:
+        return TelemetryEvent.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
@@ -56,9 +77,12 @@ def health() -> dict[str, Any]:
 
 
 @app.post("/v1/playmate/events")
-def post_event(event: TelemetryEvent) -> dict[str, Any]:
+async def post_event(request: Request) -> dict[str, Any]:
     try:
+        event = await _event_from_request(request)
         return _insert_event(event)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
