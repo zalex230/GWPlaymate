@@ -71,7 +71,6 @@ def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "gwplaymate-windows-bridge",
-        "supabase_project": "akijihvbqemiqpbeknnr",
         "supabase_configured": bool(settings.supabase_url and settings.supabase_service_key),
     }
 

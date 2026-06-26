@@ -21,7 +21,7 @@ The C++ plugin still captures local JSONL logs. Cloud credentials live only in t
 Create a virtual environment and install pinned dependencies:
 
 ```powershell
-cd C:\Users\alexz\Documents\Playmate - GWToolbox_Fork
+cd C:\dev\GWPlaymate
 python -m venv .venv-playmate
 .\.venv-playmate\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
@@ -33,7 +33,8 @@ Copy the template and fill in your Supabase values:
 Copy-Item backend\.env.example backend\.env
 ```
 
-The Supabase project is `GWPlaymate` / `akijihvbqemiqpbeknnr`.
+Use your own Supabase project URL and keys in `backend/.env`. For example,
+`SUPABASE_URL=https://your-project-ref.supabase.co`.
 
 Use the `service_role` key only in `backend/.env` on trusted machines. Do not put Supabase keys in the
 GWToolbox plugin UI, the DLL, or committed files.
