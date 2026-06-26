@@ -160,6 +160,12 @@ class RepliesResponse(BaseModel):
     replies: list[str] = Field(default_factory=list)
 
 
+class HermesEventResponse(BaseModel):
+    accepted: bool = True
+    replies: list[str] = Field(default_factory=list)
+    audit_error: str | None = None
+
+
 class HermesDecision(BaseModel):
     should_speak: bool = False
     channel_override: Literal["CHANNEL_PARTY", "CHANNEL_LOCAL", "CHANNEL_SYSTEM"] = "CHANNEL_LOCAL"
