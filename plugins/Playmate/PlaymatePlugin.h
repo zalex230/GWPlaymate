@@ -106,6 +106,7 @@ private:
     void MaybeQueueEnvironmentAlert();
     void QueueReply(std::wstring reply);
     void FlushRepliesToChat();
+    void ShowCompanionSpeechBubble(const std::wstring& reply) const;
     void ApplyConfig();
     void SetStatus(std::string status);
 
@@ -127,11 +128,13 @@ private:
     bool local_capture_ = true;
     bool send_to_backend_ = false;
     bool inject_replies_ = true;
+    bool show_speech_bubbles_ = true;
     bool environment_radar_ = true;
     std::atomic_bool telemetry_enabled_ = true;
     std::atomic_bool local_capture_enabled_ = true;
     std::atomic_bool backend_enabled_ = false;
     std::atomic_bool reply_injection_enabled_ = true;
+    std::atomic_bool speech_bubbles_enabled_ = true;
     std::atomic_bool environment_radar_enabled_ = true;
     std::atomic<int> poll_interval_ms_ = 1000;
     float poll_interval_sec_ = 1.0f;

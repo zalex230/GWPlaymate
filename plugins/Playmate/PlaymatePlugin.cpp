@@ -7,8 +7,11 @@
 #include <GWCA/GameEntities/Quest.h>
 #include <GWCA/Managers/AgentMgr.h>
 #include <GWCA/Managers/ChatMgr.h>
+#include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/QuestMgr.h>
+#include <GWCA/Managers/StoCMgr.h>
+#include <GWCA/Packets/StoC.h>
 
 #include <HttpClient.h>
 #include <glaze/glaze.hpp>
@@ -290,6 +293,33 @@ namespace {
         snprintf(buffer, buffer_size, "%.1fs ago", static_cast<double>(age_ms) / 1000.0);
         return buffer;
     }
+
+    std::wstring SpeechBubbleMessage(const std::wstring& reply)
+    {
+        constexpr size_t max_visible_chars = 110;
+        std::wstring cleaned;
+        cleaned.reserve(std::min(reply.size(), max_visible_chars));
+        for (const wchar_t ch : reply) {
+            if (ch == L'\r' || ch == L'\n' || ch == L'\t') {
+                cleaned.push_back(L' ');
+            }
+            else if (ch >= 0x20) {
+                cleaned.push_back(ch);
+            }
+            if (cleaned.size() >= max_visible_chars) {
+                break;
+            }
+        }
+
+        while (!cleaned.empty() && cleaned.back() == L' ') {
+            cleaned.pop_back();
+        }
+        if (cleaned.empty()) {
+            return {};
+        }
+
+        return std::format(L"\x108\x107{}\x1", cleaned);
+    }
 }
 
 DLLAPI ToolboxPlugin* ToolboxPluginInstance()
@@ -350,6 +380,7 @@ void PlaymatePlugin::LoadSettings(const wchar_t* folder)
     LoadSetting("local_capture", local_capture_);
     LoadSetting("send_to_backend", send_to_backend_);
     LoadSetting("inject_replies", inject_replies_);
+    LoadSetting("show_speech_bubbles", show_speech_bubbles_);
     LoadSetting("environment_radar", environment_radar_);
     LoadSetting("backend_url", backend_url);
     LoadSetting("api_token", api_token);
@@ -377,6 +408,7 @@ void PlaymatePlugin::SaveSettings(const wchar_t* folder)
     SaveSetting("local_capture", local_capture_);
     SaveSetting("send_to_backend", send_to_backend_);
     SaveSetting("inject_replies", inject_replies_);
+    SaveSetting("show_speech_bubbles", show_speech_bubbles_);
     SaveSetting("environment_radar", environment_radar_);
     SaveSetting("backend_url", std::string(backend_url_input_));
     SaveSetting("api_token", std::string(api_token_input_));
@@ -393,6 +425,7 @@ void PlaymatePlugin::DrawSettings()
     config_changed |= ImGui::Checkbox("Write local JSONL capture", &local_capture_);
     config_changed |= ImGui::Checkbox("Send telemetry to backend", &send_to_backend_);
     config_changed |= ImGui::Checkbox("Inject companion replies into party chat", &inject_replies_);
+    config_changed |= ImGui::Checkbox("Show companion speech bubbles", &show_speech_bubbles_);
     config_changed |= ImGui::Checkbox("Enable environment radar", &environment_radar_);
     config_changed |= ImGui::InputText("Local backend URL", backend_url_input_, sizeof(backend_url_input_));
     config_changed |= ImGui::InputText("Local API token", api_token_input_, sizeof(api_token_input_), ImGuiInputTextFlags_Password);
@@ -826,6 +859,7 @@ void PlaymatePlugin::FlushRepliesToChat()
     }
     for (const auto& reply : replies) {
         const auto persona = CurrentPersonaNameWide();
+        ShowCompanionSpeechBubble(reply);
         GW::Chat::WriteChat(GW::Chat::CHANNEL_GROUP, reply.c_str(), persona.c_str(), true);
         std::lock_guard lock(status_mutex_);
         ++received_count_;
@@ -833,6 +867,30 @@ void PlaymatePlugin::FlushRepliesToChat()
         last_reply_ms_ = MonotonicMs();
         last_reply_status_ = "Reply received";
     }
+}
+
+void PlaymatePlugin::ShowCompanionSpeechBubble(const std::wstring& reply) const
+{
+    if (!speech_bubbles_enabled_.load()) {
+        return;
+    }
+
+    const std::wstring bubble = SpeechBubbleMessage(reply);
+    if (bubble.empty()) {
+        return;
+    }
+
+    GW::GameThread::Enqueue([bubble] {
+        const GW::AgentLiving* player = GW::Agents::GetControlledCharacter();
+        if (!player || !player->agent_id) {
+            return;
+        }
+
+        GW::Packet::StoC::SpeechBubble packet;
+        packet.agent_id = player->agent_id;
+        wcsncpy_s(packet.message, bubble.c_str(), _TRUNCATE);
+        GW::StoC::EmulatePacket(&packet);
+    });
 }
 
 void PlaymatePlugin::ApplyConfig()
@@ -843,6 +901,7 @@ void PlaymatePlugin::ApplyConfig()
     local_capture_enabled_.store(local_capture_);
     backend_enabled_.store(send_to_backend_);
     reply_injection_enabled_.store(inject_replies_);
+    speech_bubbles_enabled_.store(show_speech_bubbles_);
     environment_radar_enabled_.store(environment_radar_);
     poll_interval_ms_.store(static_cast<int>(poll_interval_sec_ * 1000.0f));
     radar_interval_sec_ = std::clamp(radar_interval_sec_, 2.0f, 30.0f);

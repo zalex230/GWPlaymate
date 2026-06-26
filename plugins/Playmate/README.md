@@ -32,6 +32,8 @@ The plugin can also POST events to a local companion service:
 
 Replies are injected locally with `GW::Chat::WriteChat`, using the active companion persona as the sender. This writes to the client chat window; it does not send a message to ArenaNet servers.
 
+When `Show companion speech bubbles` is enabled, replies also render as a local speech bubble over the active character's head. This uses the client-side speech bubble UI path and is only visible locally.
+
 The Playmate panel shows the current message lifecycle: whether the last event was accepted by the local bridge, whether the companion is waiting on Hermes/LLM interpretation, and when the last reply arrived.
 
 Environment radar sweeps run only in explorable areas. They emit transition-style `environment_alert` telemetry for nearby enemies, combat start, danger spikes, and combat ending, instead of streaming constant raw agent snapshots.
