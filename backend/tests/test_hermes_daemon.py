@@ -21,6 +21,7 @@ class HermesDaemonTests(unittest.TestCase):
                     "persona": "A Test",
                     "event_type": "player_chat",
                     "map_id": 42,
+                    "map_name": "Ascalon City",
                     "session_id": "s1",
                 },
             }
@@ -29,6 +30,7 @@ class HermesDaemonTests(unittest.TestCase):
         self.assertEqual(event.persona, "A Test")
         self.assertEqual(event.event_type, "player_chat")
         self.assertEqual(event.map_id, 42)
+        self.assertEqual(event.map_name, "Ascalon City")
 
     def test_event_from_game_log_preserves_gameplay_metadata(self) -> None:
         event = event_from_game_log(

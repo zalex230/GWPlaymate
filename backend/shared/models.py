@@ -17,6 +17,7 @@ class TelemetryEvent(BaseModel):
     channel: str
     message: str
     map_id: int = 0
+    map_name: str = ""
     instance_type: int = 0
     district: int = 0
     instance_time: int = 0
@@ -68,6 +69,7 @@ class TelemetryEvent(BaseModel):
             "client_time": self.client_time,
             "event_type": self.event_type,
             "map_id": self.map_id,
+            "map_name": self.map_name,
             "instance_type": self.instance_type,
             "district": self.district,
             "instance_time": self.instance_time,

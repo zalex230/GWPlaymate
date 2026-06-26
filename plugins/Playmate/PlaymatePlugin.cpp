@@ -4,6 +4,7 @@
 #include <GWCA/Context/CharContext.h>
 #include <GWCA/GameEntities/Agent.h>
 #include <GWCA/GameContainers/Array.h>
+#include <GWCA/GameEntities/Map.h>
 #include <GWCA/GameEntities/Quest.h>
 #include <GWCA/Managers/AgentMgr.h>
 #include <GWCA/Managers/ChatMgr.h>
@@ -797,6 +798,7 @@ void PlaymatePlugin::QueueTelemetry(std::string event_type, std::string sender, 
     event.channel = std::move(channel);
     event.message = std::move(message);
     event.map_id = snapshot.map_id;
+    event.map_name = snapshot.map_name;
     event.instance_type = snapshot.instance_type;
     event.district = snapshot.district;
     event.instance_time = snapshot.instance_time;
@@ -830,6 +832,7 @@ void PlaymatePlugin::QueueEnvironmentAlert(std::string alert_type, std::string s
     event.channel = "system";
     event.message = std::move(message);
     event.map_id = snapshot.map_id;
+    event.map_name = snapshot.map_name;
     event.instance_type = snapshot.instance_type;
     event.district = snapshot.district;
     event.instance_time = snapshot.instance_time;
@@ -874,6 +877,7 @@ void PlaymatePlugin::QueueGameplayEvent(TelemetryEvent event)
         event.channel = "system";
     }
     event.map_id = snapshot.map_id;
+    event.map_name = snapshot.map_name;
     event.instance_type = snapshot.instance_type;
     event.district = snapshot.district;
     event.instance_time = snapshot.instance_time;
@@ -1030,6 +1034,7 @@ PlaymatePlugin::Snapshot PlaymatePlugin::BuildSnapshot() const
     }
 
     snapshot.map_id = static_cast<uint32_t>(GW::Map::GetMapID());
+    snapshot.map_name = MapNameForId(snapshot.map_id);
     snapshot.instance_type = static_cast<uint32_t>(GW::Map::GetInstanceType());
     snapshot.district = static_cast<uint32_t>(std::max(0, GW::Map::GetDistrict()));
     snapshot.instance_time = GW::Map::GetInstanceTime();
@@ -1045,6 +1050,34 @@ PlaymatePlugin::Snapshot PlaymatePlugin::BuildSnapshot() const
         snapshot.active_quest_objectives = WideToUtf8(quest->objectives);
     }
     return snapshot;
+}
+
+std::string PlaymatePlugin::MapNameForId(const uint32_t map_id) const
+{
+    if (!map_id) {
+        return {};
+    }
+
+    std::lock_guard lock(map_name_cache_mutex_);
+    std::unique_ptr<DecodedMapName>& entry = map_name_cache_[map_id];
+    if (!entry) {
+        entry = std::make_unique<DecodedMapName>();
+    }
+    if (entry->decoded[0]) {
+        return WideToUtf8(entry->decoded);
+    }
+    if (entry->requested) {
+        return {};
+    }
+
+    const GW::AreaInfo* area = GW::Map::GetMapInfo(static_cast<GW::Constants::MapID>(map_id));
+    if (!(area && area->name_id && GW::UI::UInt32ToEncStr(area->name_id, entry->encoded, _countof(entry->encoded)))) {
+        return {};
+    }
+
+    entry->requested = true;
+    GW::UI::AsyncDecodeStr(entry->encoded, entry->decoded, _countof(entry->decoded));
+    return {};
 }
 
 PlaymatePlugin::EnvironmentScan PlaymatePlugin::BuildEnvironmentScan() const

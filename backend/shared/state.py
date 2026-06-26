@@ -15,6 +15,7 @@ class LiveWorldState:
     recent_alert_limit: int = 8
     current_zone: str = "Unknown"
     map_id: int = 0
+    map_name: str = ""
     instance_type: int = 0
     active_quest_id: int = 0
     active_quest_name: str = ""
@@ -34,6 +35,7 @@ class LiveWorldState:
         self.persona = event.persona or self.persona
         self.session_id = event.session_id or self.session_id
         self.map_id = event.map_id
+        self.map_name = event.map_name or self.map_name
         self.instance_type = event.instance_type
         self.active_quest_id = event.active_quest_id
         self.active_quest_name = event.active_quest_name
@@ -65,7 +67,7 @@ class LiveWorldState:
         alerts = "\n".join(str(alert) for alert in self.recent_alerts) or "None"
         return (
             f"Persona: {self.persona}\n"
-            f"Map ID: {self.map_id}\n"
+            f"Map: {self.map_name or 'Unknown'} ({self.map_id})\n"
             f"Instance Type: {self.instance_type}\n"
             f"Active Quest: {self.active_quest_id} {self.active_quest_name}\n"
             f"Quest Objectives: {self.active_quest_objectives or 'None'}\n"

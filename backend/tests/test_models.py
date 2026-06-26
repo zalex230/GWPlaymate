@@ -15,11 +15,13 @@ class ModelTests(unittest.TestCase):
             sender="Player",
             channel=" Party ",
             message="hello",
+            map_name="Ascalon City",
         )
 
         self.assertEqual(event.event_type, "player_chat")
         self.assertEqual(event.channel, "party")
         self.assertEqual(event.to_game_log_insert()["payload"]["persona"], "A Test")
+        self.assertEqual(event.to_game_log_insert()["payload"]["map_name"], "Ascalon City")
 
     def test_telemetry_requires_message(self) -> None:
         with self.assertRaises(ValidationError):

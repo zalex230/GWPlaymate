@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -51,6 +52,7 @@ public:
 private:
     struct Snapshot {
         uint32_t map_id = 0;
+        std::string map_name;
         uint32_t instance_type = 0;
         uint32_t district = 0;
         uint32_t instance_time = 0;
@@ -69,6 +71,7 @@ private:
         std::string channel;
         std::string message;
         uint32_t map_id = 0;
+        std::string map_name;
         uint32_t instance_type = 0;
         uint32_t district = 0;
         uint32_t instance_time = 0;
@@ -113,6 +116,12 @@ private:
         bool in_combat = false;
     };
 
+    struct DecodedMapName {
+        wchar_t encoded[8]{};
+        wchar_t decoded[128]{};
+        bool requested = false;
+    };
+
     void RegisterHooks();
     void RemoveHooks();
     void StartWorker();
@@ -134,6 +143,7 @@ private:
 
     [[nodiscard]] Snapshot BuildSnapshot() const;
     [[nodiscard]] EnvironmentScan BuildEnvironmentScan() const;
+    [[nodiscard]] std::string MapNameForId(uint32_t map_id) const;
     [[nodiscard]] std::string CurrentPersonaName() const;
     [[nodiscard]] std::wstring CurrentPersonaNameWide() const;
     [[nodiscard]] std::pair<std::string, std::string> GetConfig() const;
@@ -210,6 +220,8 @@ private:
     mutable std::mutex gameplay_state_mutex_;
     std::unordered_map<uint32_t, uint32_t> last_agent_states_;
     std::unordered_map<uint32_t, float> last_mission_progress_;
+    mutable std::mutex map_name_cache_mutex_;
+    mutable std::unordered_map<uint32_t, std::unique_ptr<DecodedMapName>> map_name_cache_;
 
     GW::HookEntry send_chat_entry_;
     GW::HookEntry write_chat_entry_;
