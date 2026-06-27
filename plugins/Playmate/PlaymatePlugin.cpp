@@ -910,6 +910,7 @@ void PlaymatePlugin::MaybeQueueEnvironmentAlert()
     if (!scan.valid) {
         last_hostile_count_ = 0;
         last_close_hostile_count_ = 0;
+        last_player_hp_ = 0.0f;
         last_in_combat_ = false;
         return;
     }
@@ -918,8 +919,19 @@ void PlaymatePlugin::MaybeQueueEnvironmentAlert()
     const bool danger_spike = scan.close_hostile_count >= 3 && scan.close_hostile_count > last_close_hostile_count_;
     const bool combat_started = scan.in_combat && !last_in_combat_;
     const bool combat_ended = !scan.in_combat && last_in_combat_ && scan.hostile_count == 0;
+    const bool has_hp_baseline = last_player_hp_ > 0.0f;
+    const float hp_drop = has_hp_baseline ? last_player_hp_ - scan.player_hp : 0.0f;
+    const bool significant_hp_drop = hp_drop >= 0.08f;
+    const bool crossed_below_half_hp = has_hp_baseline && last_player_hp_ >= 0.50f && scan.player_hp < 0.50f;
 
-    if (danger_spike) {
+    if (significant_hp_drop || crossed_below_half_hp) {
+        QueueEnvironmentAlert(
+            "under_attack",
+            (crossed_below_half_hp || scan.player_hp < 0.35f) ? "HIGH" : "NORMAL",
+            std::format("Player is under attack. Health is at {:.0f} percent.", scan.player_hp * 100.0f),
+            scan);
+    }
+    else if (danger_spike) {
         QueueEnvironmentAlert(
             "danger_spike",
             "HIGH",
@@ -942,6 +954,7 @@ void PlaymatePlugin::MaybeQueueEnvironmentAlert()
 
     last_hostile_count_ = scan.hostile_count;
     last_close_hostile_count_ = scan.close_hostile_count;
+    last_player_hp_ = scan.player_hp;
     last_in_combat_ = scan.in_combat;
 }
 

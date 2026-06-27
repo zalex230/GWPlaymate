@@ -131,6 +131,37 @@ class HermesDaemonTests(unittest.TestCase):
         self.assertTrue(decision.should_speak)
         self.assertEqual(decision.urgency, "HIGH")
 
+    def test_fallback_rule_replies_to_under_attack(self) -> None:
+        decision = fallback_rule_decision(
+            event_from_environment_alert(
+                {
+                    "alert_type": "under_attack",
+                    "severity": "HIGH",
+                    "message": "Player is under attack.",
+                    "payload": {"player_hp": 0.42},
+                }
+            )
+        )
+
+        self.assertTrue(decision.should_speak)
+        self.assertEqual(decision.urgency, "HIGH")
+        self.assertIn("42%", decision.response)
+
+    def test_fallback_rule_replies_to_combat_started(self) -> None:
+        decision = fallback_rule_decision(
+            event_from_environment_alert(
+                {
+                    "alert_type": "combat_started",
+                    "severity": "HIGH",
+                    "message": "Combat started.",
+                }
+            )
+        )
+
+        self.assertTrue(decision.should_speak)
+        self.assertEqual(decision.urgency, "HIGH")
+        self.assertIn("Contact", decision.response)
+
     def test_fallback_rule_replies_to_party_member_down(self) -> None:
         decision = fallback_rule_decision(
             event_from_game_log(

@@ -163,6 +163,20 @@ def fallback_rule_decision(event: TelemetryEvent) -> HermesDecision:
                 urgency="HIGH",
                 response=f"Careful. {event.close_hostile_count} enemies are close.",
             )
+        if event.alert_type == "under_attack":
+            return HermesDecision(
+                should_speak=True,
+                channel_override="CHANNEL_PARTY",
+                urgency="HIGH",
+                response=f"Taking hits. Health is around {event.player_hp:.0%}. Cover me.",
+            )
+        if event.alert_type == "combat_started":
+            return HermesDecision(
+                should_speak=True,
+                channel_override="CHANNEL_PARTY",
+                urgency="HIGH",
+                response="Contact. Fight's on.",
+            )
         return HermesDecision(
             should_speak=True,
             channel_override="CHANNEL_PARTY",

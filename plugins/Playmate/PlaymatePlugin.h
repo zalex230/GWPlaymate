@@ -216,6 +216,7 @@ private:
     uint32_t last_active_quest_id_ = 0;
     uint32_t last_hostile_count_ = 0;
     uint32_t last_close_hostile_count_ = 0;
+    float last_player_hp_ = 0.0f;
     bool last_in_combat_ = false;
     mutable std::mutex gameplay_state_mutex_;
     std::unordered_map<uint32_t, uint32_t> last_agent_states_;
